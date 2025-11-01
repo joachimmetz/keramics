@@ -52,7 +52,7 @@ impl NtfsMasterFileTable {
     }
 
     /// Retrieves a specific block range.
-    fn get_block_range(&self, mut virtual_cluster_offset: u64) -> Option<&NtfsBlockRange> {
+    fn get_block_range(&self, virtual_cluster_offset: u64) -> Option<&NtfsBlockRange> {
         for block_range in self.block_ranges.iter() {
             let block_end_offset: u64 = block_range.virtual_cluster_offset + block_range.size;
 

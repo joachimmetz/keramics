@@ -11,13 +11,12 @@
  * under the License.
  */
 
+use std::collections::BTreeMap;
 use std::io::SeekFrom;
 
 use keramics_checksums::ReversedCrc32Context;
 use keramics_core::mediator::{Mediator, MediatorReference};
 use keramics_core::{DataStreamReference, ErrorTrace};
-
-use crate::block_tree::BlockTree;
 
 use super::features::ExtFeatures;
 use super::group_descriptor::ExtGroupDescriptor;
@@ -43,8 +42,11 @@ pub struct ExtInodeTable {
     /// Number of inodes per block group.
     number_of_inodes_per_block_group: u32,
 
-    /// Block tree.
-    block_tree: BlockTree<ExtGroupDescriptor>,
+    /// Group size.
+    group_size: u64,
+
+    /// Group descriptors.
+    group_descriptors: BTreeMap<u64, ExtGroupDescriptor>,
 }
 
 impl ExtInodeTable {
@@ -57,7 +59,8 @@ impl ExtInodeTable {
             block_size: 0,
             inode_size: 0,
             number_of_inodes_per_block_group: 0,
-            block_tree: BlockTree::<ExtGroupDescriptor>::new(0, 0, 0),
+            group_size: 0,
+            group_descriptors: BTreeMap::new(),
         }
     }
 
@@ -75,31 +78,31 @@ impl ExtInodeTable {
         self.block_size = block_size;
         self.inode_size = inode_size;
         self.number_of_inodes_per_block_group = number_of_inodes_per_block_group;
+        self.group_size = (number_of_inodes_per_block_group as u64) * (inode_size as u64);
 
-        let group_size: u64 = (number_of_inodes_per_block_group as u64) * (inode_size as u64);
-        let block_tree_size: u64 = (group_descriptors.len() as u64) * group_size;
-        self.block_tree = BlockTree::<ExtGroupDescriptor>::new(
-            block_tree_size,
-            number_of_inodes_per_block_group as u64,
-            inode_size as u64,
-        );
         let mut inode_table_offset: u64 = 0;
+
         for group_descriptor in group_descriptors.drain(0..) {
-            match self
-                .block_tree
-                .insert_value(inode_table_offset, group_size, group_descriptor)
-            {
-                Ok(_) => {}
-                Err(error) => {
-                    return Err(keramics_core::error_trace_new_with_error!(
-                        "Unable to insert block range into block tree",
-                        error
-                    ));
-                }
-            };
-            inode_table_offset += group_size;
+            self.group_descriptors
+                .insert(inode_table_offset, group_descriptor);
+
+            inode_table_offset += self.group_size;
         }
         Ok(())
+    }
+
+    /// Retrieves a specific group descriptor.
+    fn get_group_descriptor(&self, inode_number: u32) -> Option<&ExtGroupDescriptor> {
+        let inode_table_offset: u64 = ((inode_number - 1) as u64) * (self.inode_size as u64);
+
+        for (group_offset, group_descriptor) in self.group_descriptors.iter() {
+            let group_end_offset: u64 = *group_offset + self.group_size;
+
+            if inode_table_offset >= *group_offset && inode_table_offset < group_end_offset {
+                return Some(group_descriptor);
+            }
+        }
+        None
     }
 
     /// Retrieves a specific inode.
@@ -108,18 +111,15 @@ impl ExtInodeTable {
         data_stream: &DataStreamReference,
         inode_number: u32,
     ) -> Result<ExtInode, ErrorTrace> {
-        let inode_table_offset: u64 = ((inode_number - 1) as u64) * (self.inode_size as u64);
-
-        let group_descriptor: &ExtGroupDescriptor =
-            match self.block_tree.get_value(inode_table_offset) {
-                Some(value) => value,
-                None => {
-                    return Err(keramics_core::error_trace_new!(format!(
-                        "Missing group descriptor for inode: {}",
-                        inode_number
-                    )));
-                }
-            };
+        let group_descriptor: &ExtGroupDescriptor = match self.get_group_descriptor(inode_number) {
+            Some(group_descriptor) => group_descriptor,
+            None => {
+                return Err(keramics_core::error_trace_new!(format!(
+                    "Missing group descriptor for inode: {}",
+                    inode_number
+                )));
+            }
+        };
         let inode_group_index: u32 = (inode_number - 1) % self.number_of_inodes_per_block_group;
 
         let mut inode_data_offset: u64 = (inode_group_index as u64) * (self.inode_size as u64);
