@@ -56,7 +56,9 @@ impl NtfsMasterFileTable {
         for block_range in self.block_ranges.iter() {
             let block_end_offset: u64 = block_range.virtual_cluster_offset + block_range.size;
 
-            if virtual_cluster_offset >= block_range.virtual_cluster_offset && virtual_cluster_offset < block_end_offset {
+            if virtual_cluster_offset >= block_range.virtual_cluster_offset
+                && virtual_cluster_offset < block_end_offset
+            {
                 return Some(block_range);
             }
         }

@@ -334,7 +334,9 @@ impl ExtFileSystem {
                         number_of_block_groups_per_meta_group =
                             superblock.block_size / group_descriptor_size;
 
-                        if superblock.first_meta_block_group > u32::MAX / number_of_block_groups_per_meta_group {
+                        if superblock.first_meta_block_group
+                            > u32::MAX / number_of_block_groups_per_meta_group
+                        {
                             return Err(keramics_core::error_trace_new!(
                                 "Invalid first meta block group value out of bounds"
                             ));

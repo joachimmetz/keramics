@@ -59,7 +59,9 @@ impl NtfsBlockStream {
         for block_range in self.block_ranges.iter() {
             let block_end_offset: u64 = block_range.virtual_cluster_offset + block_range.size;
 
-            if virtual_cluster_offset >= block_range.virtual_cluster_offset && virtual_cluster_offset < block_end_offset {
+            if virtual_cluster_offset >= block_range.virtual_cluster_offset
+                && virtual_cluster_offset < block_end_offset
+            {
                 return Some(block_range);
             }
         }
@@ -164,13 +166,16 @@ impl NtfsBlockStream {
                         )));
                     }
                 };
-                let mut range_logical_end_offset: u64 = block_range.virtual_cluster_offset + block_range.size;
+                let mut range_logical_end_offset: u64 =
+                    block_range.virtual_cluster_offset + block_range.size;
                 if range_logical_end_offset > self.valid_data_size {
                     range_logical_end_offset = self.valid_data_size;
                 };
-                let range_relative_offset: u64 = current_offset - block_range.virtual_cluster_offset;
-                let range_remainder_size: u64 =
-                    (range_logical_end_offset - block_range.virtual_cluster_offset) - range_relative_offset;
+                let range_relative_offset: u64 =
+                    current_offset - block_range.virtual_cluster_offset;
+                let range_remainder_size: u64 = (range_logical_end_offset
+                    - block_range.virtual_cluster_offset)
+                    - range_relative_offset;
                 let read_remainder_size: usize = read_size - data_offset;
                 let range_read_size: usize =
                     min(read_remainder_size, range_remainder_size as usize);
