@@ -159,6 +159,12 @@ impl NtfsMftAttribute {
                 return Err(error);
             }
         }
+        if mft_attribute_header.attribute_size < 16 {
+            return Err(keramics_core::error_trace_new!(format!(
+                "Unsupported attribute size: {}",
+                mft_attribute_header.attribute_size
+            )));
+        }
         self.attribute_type = mft_attribute_header.attribute_type;
         self.attribute_size = mft_attribute_header.attribute_size;
         self.non_resident_flag = mft_attribute_header.non_resident_flag;
