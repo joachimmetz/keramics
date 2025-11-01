@@ -259,7 +259,7 @@ impl ExtSuperblock {
         }
         self.block_size = bytes_to_u32_le!(data, 24);
 
-        if self.block_size > 32 - 10 {
+        if self.block_size >= 32 - 10 {
             return Err(keramics_core::error_trace_new!(format!(
                 "Invalid block size: {} value out of bounds",
                 self.block_size
