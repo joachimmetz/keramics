@@ -51,6 +51,18 @@ impl NtfsMasterFileTable {
         }
     }
 
+    /// Retrieves a specific block range.
+    fn get_block_range(&self, mut virtual_cluster_offset: u64) -> Option<&NtfsBlockRange> {
+        for block_range in self.block_ranges.iter() {
+            let block_end_offset: u64 = block_range.virtual_cluster_offset + block_range.size;
+
+            if virtual_cluster_offset >= block_range.virtual_cluster_offset && virtual_cluster_offset < block_end_offset {
+                return Some(block_range);
+            }
+        }
+        None
+    }
+
     /// Adds a cluster group to the master file table.
     fn add_cluster_group(&mut self, cluster_group: &NtfsClusterGroup) -> Result<(), ErrorTrace> {
         let mut virtual_cluster_number: u64 = cluster_group.first_vcn;
@@ -75,7 +87,7 @@ impl NtfsMasterFileTable {
             let block_range: NtfsBlockRange = NtfsBlockRange::new(
                 virtual_cluster_offset,
                 data_run.block_number,
-                data_run.number_of_blocks,
+                range_size,
                 range_type,
             );
             self.block_ranges.push(block_range);
@@ -96,16 +108,6 @@ impl NtfsMasterFileTable {
         Ok(())
     }
 
-    /// Retrieves a specific block range.
-    fn get_block_range(&self, mut virtual_cluster_offset: u64) -> Option<&NtfsBlockRange> {
-        for block_range in self.block_ranges.iter() {
-            if virtual_cluster_offset >= block_range.virtual_cluster_offset {
-                return Some(block_range);
-            }
-        }
-        None
-    }
-
     /// Retrieves a specific entry.
     pub fn get_entry(
         &self,
@@ -115,7 +117,7 @@ impl NtfsMasterFileTable {
         let virtual_cluster_offset: u64 = entry_number * (self.mft_entry_size as u64);
 
         let block_range: &NtfsBlockRange = match self.get_block_range(virtual_cluster_offset) {
-            Some(value) => value,
+            Some(block_range) => block_range,
             None => {
                 return Err(keramics_core::error_trace_new!(format!(
                     "Missing block range for MFT entry: {}",
