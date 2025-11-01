@@ -142,6 +142,14 @@ impl ExtGroupDescriptorTable {
     ) -> Result<(), ErrorTrace> {
         let data_size: usize =
             (self.number_of_group_descriptors as usize) * self.group_descriptor_size;
+
+        // Note that 16777216 is an arbitrary chosen limit.
+        if data_size == 0 || data_size > 16777216 {
+            return Err(keramics_core::error_trace_new!(format!(
+                "Unsupported parent locator data size: {} value out of bounds",
+                data_size
+            )));
+        }
         let mut data: Vec<u8> = vec![0; data_size];
 
         let offset: u64 =
