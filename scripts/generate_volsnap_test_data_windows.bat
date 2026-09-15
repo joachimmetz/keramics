@@ -22,7 +22,7 @@ if not exist "test_data\volsnap" (
 rem Create a dynamic-size VHD image with a NTFS file system with 2 volume snapshots
 set unitsize=4096
 set imagename=volsnap.vhd
-set imagesize=64
+set imagesize=128
 
 del /f %cd%\test_data\volsnap\%imagename%
 
@@ -40,11 +40,11 @@ echo assign letter=x >> CreateVHD.diskpart
 
 call :run_diskpart CreateVHD.diskpart
 
-"%VSHADOW_EXE%" -p -nw x:
+"%VSHADOW_EXE%" -p x:
 
 call :create_test_file_entries x
 
-"%VSHADOW_EXE%" -p -nw x:
+"%VSHADOW_EXE%" -p x:
 
 vssadmin list shadows
 
