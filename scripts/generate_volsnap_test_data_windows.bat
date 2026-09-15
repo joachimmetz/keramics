@@ -40,11 +40,11 @@ echo assign letter=x >> CreateVHD.diskpart
 
 call :run_diskpart CreateVHD.diskpart
 
-"%VSHADOW_EXE%" -p x:
+"%VSHADOW_EXE%" -p -nw x:
 
 call :create_test_file_entries x
 
-"%VSHADOW_EXE%" -p x:
+"%VSHADOW_EXE%" -p -nw x:
 
 vssadmin list shadows
 
