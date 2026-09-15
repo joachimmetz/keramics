@@ -11,8 +11,8 @@ the same time.
 
 Volume Shadow Snapshot (VSS) can use different providers to store shadow copies, this document
 focuses on the "Microsoft Software Shadow Copy provider 1.0" (GUID:
-b5946137-7b9f-4925-af80-51abd60b20d5) and will refer to it as volsnap. The volsnap provider stores
-the copies on the local volume using 16 KiB blocks.
+b5946137-7b9f-4925-af80-51abd60b20d5) which relies on volsnap.sys. The volsnap driver manages the
+data structures and stores the copies on the local volume using 16 KiB blocks.
 
 Volsnap uses the GUID 3808876b-c176-4e48-b7ae-04046e6cc752 to identify its data or metadata files.
 It leverages several metadata files in "\\System Volume Information" directory:
