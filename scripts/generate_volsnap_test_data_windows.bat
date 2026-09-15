@@ -46,6 +46,8 @@ call :create_test_file_entries x
 
 "%VSHADOW_EXE%" -p x:
 
+vssadmin list shadows
+
 echo select vdisk file=%cd%\test_data\volsnap\%imagename% > UnmountVHD.diskpart
 echo detach vdisk >> UnmountVHD.diskpart
 
