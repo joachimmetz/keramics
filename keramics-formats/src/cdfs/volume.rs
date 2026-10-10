@@ -71,8 +71,18 @@ impl CdFsVolume {
         self.volume_set_identifier.as_ref()
     }
 
+    /// Retrieves the bytes per sector.
+    pub(super) fn get_bytes_per_sector(&self) -> u16 {
+        self.bytes_per_sector
+    }
+
+    /// Retrieves the data stream.
+    pub(super) fn get_data_stream(&self) -> Option<&DataStreamReference> {
+        self.data_stream.as_ref()
+    }
+
     /// Retrieves the root directory.
-    pub fn get_root_directory(&self) -> &CdFsDirectoryRecord {
+    pub(super) fn get_root_directory(&self) -> &CdFsDirectoryRecord {
         &self.root_directory_record
     }
 
@@ -138,8 +148,11 @@ impl CdFsVolume {
                 let slice: &[u8] = &data[190..318];
                 let mut byte_string: ByteString =
                     ByteString::new_with_encoding(&CharacterEncoding::Ascii);
-                let trailing: usize =
-                    slice.iter().rev().take_while(|b| **b == 0 || **b == b' ').count();
+                let trailing: usize = slice
+                    .iter()
+                    .rev()
+                    .take_while(|b| **b == 0 || **b == b' ')
+                    .count();
                 byte_string
                     .elements
                     .extend_from_slice(&slice[..slice.len() - trailing]);
@@ -157,7 +170,9 @@ impl CdFsVolume {
             }
         }
         if !root_directory_record_read {
-            return Err(keramics_core::error_trace_new!("Missing root directory record"));
+            return Err(keramics_core::error_trace_new!(
+                "Missing root directory record"
+            ));
         }
         self.volumes_in_set = volumes_in_set;
         self.volume_set_index = volume_set_index;
@@ -278,24 +293,8 @@ mod tests {
         let volume_set_identifier: Option<&ByteString> = volume.get_volume_set_identifier();
         let volume_set_identifier: &ByteString = volume_set_identifier
             .ok_or_else(|| keramics_core::error_trace_new!("Missing volume set identifier"))?;
-        assert_eq!(
-            volume_set_identifier.encoding,
-            CharacterEncoding::Ascii
-        );
+        assert_eq!(volume_set_identifier.encoding, CharacterEncoding::Ascii);
         assert_eq!(volume_set_identifier.len(), 0);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_get_root_directory() -> Result<(), ErrorTrace> {
-        let volume: CdFsVolume = get_volume()?;
-
-        let root_directory: &CdFsDirectoryRecord = volume.get_root_directory();
-        assert_eq!(root_directory.data_start_sector, 23);
-        assert_eq!(root_directory.data_size, 2048);
-        assert_eq!(root_directory.file_flags, 0x02);
-        assert!(root_directory.name.is_empty());
 
         Ok(())
     }

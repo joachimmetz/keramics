@@ -16,7 +16,7 @@ use keramics_encodings::CharacterEncoding;
 use keramics_layout_map::LayoutMap;
 use keramics_types::{ByteString, bytes_to_u32_be, bytes_to_u32_le};
 
-#[derive(LayoutMap)]
+#[derive(Clone, LayoutMap)]
 #[layout_map(
     structure(
         byte_order = "big",

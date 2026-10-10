@@ -163,7 +163,8 @@ impl CdFsVolumeSet {
         if volume_set_indices.len() != volumes_in_set as usize {
             return Err(keramics_core::error_trace_new!(format!(
                 "Unsupported number of volumes: {} expected: {}",
-                volume_set_indices.len(), volumes_in_set
+                volume_set_indices.len(),
+                volumes_in_set
             )));
         }
         Ok(())

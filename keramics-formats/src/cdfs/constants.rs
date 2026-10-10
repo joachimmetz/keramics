@@ -16,3 +16,6 @@ pub(crate) const CDFS_VOLUME_DESCRIPTOR_SIGNATURE: &[u8; 5] = b"CD001";
 
 /// CDFS volume descriptor set terminator.
 pub(super) const CDFS_VOLUME_DESCRIPTOR_SET_TERMINATOR: &[u8; 6] = b"\xffCD001";
+
+/// CDFS directory record file flag indicating a directory.
+pub(super) const CDFS_DIRECTORY_FILE_FLAG_DIRECTORY: u8 = 0x02;
