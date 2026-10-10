@@ -44,10 +44,7 @@ impl CdFsFileSystem {
     }
 
     /// Retrieves the file entry for a specific path.
-    pub fn get_file_entry_by_path(
-        &self,
-        path: &Path,
-    ) -> Result<Option<CdFsFileEntry>, ErrorTrace> {
+    pub fn get_file_entry_by_path(&self, path: &Path) -> Result<Option<CdFsFileEntry>, ErrorTrace> {
         if path.is_empty() || path.is_relative() {
             return Ok(None);
         }

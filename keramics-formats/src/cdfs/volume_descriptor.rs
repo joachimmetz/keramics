@@ -12,11 +12,35 @@
  */
 
 use keramics_core::ErrorTrace;
+use keramics_encodings::CharacterEncoding;
 use keramics_layout_map::LayoutMap;
-use keramics_types::{bytes_to_u16_be, bytes_to_u16_le, bytes_to_u32_be, bytes_to_u32_le};
+use keramics_types::{
+    bytes_to_u16_be, bytes_to_u16_le, bytes_to_u32_be, bytes_to_u32_le, ByteString,
+};
 
 use super::constants::*;
-use super::directory_record::CdFsDirectoryRecord;
+
+pub(super) fn read_trimmed_string(data: &[u8], offset: usize, length: usize) -> Option<ByteString> {
+    if offset + length > data.len() {
+        return None;
+    }
+    let slice: &[u8] = &data[offset..offset + length];
+    let mut trailing: usize = 0;
+    for value in slice.iter().rev() {
+        if *value == 0 || *value == b' ' {
+            trailing += 1;
+        } else {
+            break;
+        }
+    }
+    let trimmed: &[u8] = &slice[..slice.len() - trailing];
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut byte_string: ByteString = ByteString::new_with_encoding(&CharacterEncoding::Ascii);
+    byte_string.elements.extend_from_slice(trimmed);
+    Some(byte_string)
+}
 
 #[derive(LayoutMap)]
 #[layout_map(
@@ -80,6 +104,9 @@ pub struct CdFsVolumeDescriptor {
     /// Type indicator.
     pub type_indicator: u8,
 
+    /// Format version.
+    pub format_version: u8,
+
     /// Volume size.
     pub volume_size: u32,
 
@@ -107,6 +134,7 @@ impl CdFsVolumeDescriptor {
     pub fn new() -> Self {
         Self {
             type_indicator: 0,
+            format_version: 0,
             volume_size: 0,
             volumes_in_set: 0,
             volume_set_index: 0,
@@ -126,6 +154,7 @@ impl CdFsVolumeDescriptor {
             return Err(keramics_core::error_trace_new!("Unsupported signature"));
         }
         self.type_indicator = data[0];
+        self.format_version = data[6];
         self.volume_size = bytes_to_u32_be!(data, 84);
 
         let volume_size: u32 = bytes_to_u32_le!(data, 80);
@@ -337,6 +366,7 @@ mod tests {
         test_struct.read_data(&test_data)?;
 
         assert_eq!(test_struct.type_indicator, 1);
+        assert_eq!(test_struct.format_version, 1);
         assert_eq!(test_struct.volume_size, 1212);
         assert_eq!(test_struct.volumes_in_set, 1);
         assert_eq!(test_struct.volume_set_index, 1);

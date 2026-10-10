@@ -22,7 +22,7 @@ use super::constants::*;
 use super::directory_record::CdFsDirectoryRecord;
 use super::file_system::CdFsFileSystem;
 use super::path_table::CdFsPathTable;
-use super::volume_descriptor::CdFsVolumeDescriptor;
+use super::volume_descriptor::{read_trimmed_string, CdFsVolumeDescriptor};
 
 #[derive(Clone)]
 /// CD file system (CDFS) volume.
@@ -30,8 +30,20 @@ pub struct CdFsVolume {
     /// Data stream.
     data_stream: Option<DataStreamReference>,
 
+    /// Format version.
+    format_version: u8,
+
+    /// System identifier.
+    system_identifier: Option<ByteString>,
+
+    /// Volume identifier.
+    volume_identifier: Option<ByteString>,
+
     /// Bytes per sector.
     bytes_per_sector: u16,
+
+    /// Volume size.
+    volume_size: u64,
 
     /// Number of volumes in set.
     volumes_in_set: u16,
@@ -51,7 +63,11 @@ impl CdFsVolume {
     pub fn new() -> Self {
         Self {
             data_stream: None,
+            format_version: 0,
+            system_identifier: None,
+            volume_identifier: None,
             bytes_per_sector: 0,
+            volume_size: 0,
             volumes_in_set: 0,
             volume_set_index: 0,
             volume_set_identifier: None,
@@ -74,9 +90,29 @@ impl CdFsVolume {
         self.volume_set_identifier.as_ref()
     }
 
+    /// Retrieves the format version.
+    pub fn get_format_version(&self) -> u8 {
+        self.format_version
+    }
+
+    /// Retrieves the system identifier.
+    pub fn get_system_identifier(&self) -> Option<&ByteString> {
+        self.system_identifier.as_ref()
+    }
+
+    /// Retrieves the volume identifier.
+    pub fn get_volume_identifier(&self) -> Option<&ByteString> {
+        self.volume_identifier.as_ref()
+    }
+
     /// Retrieves the bytes per sector.
-    pub(super) fn get_bytes_per_sector(&self) -> u16 {
+    pub fn get_bytes_per_sector(&self) -> u16 {
         self.bytes_per_sector
+    }
+
+    /// Retrieves the volume size in bytes.
+    pub fn get_volume_size(&self) -> u64 {
+        self.volume_size
     }
 
     /// Retrieves the data stream.
@@ -108,6 +144,10 @@ impl CdFsVolume {
         let mut data: Vec<u8> = vec![0; 2048];
         let mut offset: u64 = 32768;
 
+        let mut format_version: u8 = 0;
+        let mut system_identifier: Option<ByteString> = None;
+        let mut volume_identifier: Option<ByteString> = None;
+        let mut volume_size: u64 = 0;
         let mut path_table_size: u32 = 0;
         let mut path_table_start_sector_be: u32 = 0;
         let mut path_table_start_sector_le: u32 = 0;
@@ -153,23 +193,17 @@ impl CdFsVolume {
             offset += self.bytes_per_sector as u64;
 
             if volume_descriptor.type_indicator == 1 {
+                format_version = volume_descriptor.format_version;
+                volume_size =
+                    (volume_descriptor.volume_size as u64) * (self.bytes_per_sector as u64);
+                system_identifier = read_trimmed_string(&data, 8, 32);
+                volume_identifier = read_trimmed_string(&data, 40, 32);
                 path_table_size = volume_descriptor.path_table_size;
                 path_table_start_sector_be = volume_descriptor.path_table_start_sector_be;
                 path_table_start_sector_le = volume_descriptor.path_table_start_sector_le;
                 volumes_in_set = volume_descriptor.volumes_in_set;
                 volume_set_index = volume_descriptor.volume_set_index;
-                let slice: &[u8] = &data[190..318];
-                let mut byte_string: ByteString =
-                    ByteString::new_with_encoding(&CharacterEncoding::Ascii);
-                let trailing: usize = slice
-                    .iter()
-                    .rev()
-                    .take_while(|b| **b == 0 || **b == b' ')
-                    .count();
-                byte_string
-                    .elements
-                    .extend_from_slice(&slice[..slice.len() - trailing]);
-                volume_set_identifier = Some(byte_string);
+                volume_set_identifier = read_trimmed_string(&data, 190, 128);
                 match CdFsDirectoryRecord::read_data(&mut root_directory_record, &data[156..190]) {
                     Ok(_) => root_directory_record_read = true,
                     Err(mut error) => {
@@ -187,6 +221,10 @@ impl CdFsVolume {
                 "Missing root directory record"
             ));
         }
+        self.format_version = format_version;
+        self.system_identifier = system_identifier;
+        self.volume_identifier = volume_identifier;
+        self.volume_size = volume_size;
         self.volumes_in_set = volumes_in_set;
         self.volume_set_index = volume_set_index;
         self.volume_set_identifier = volume_set_identifier;
@@ -303,11 +341,54 @@ mod tests {
     fn test_get_volume_set_identifier() -> Result<(), ErrorTrace> {
         let volume: CdFsVolume = get_volume()?;
 
-        let volume_set_identifier: Option<&ByteString> = volume.get_volume_set_identifier();
-        let volume_set_identifier: &ByteString = volume_set_identifier
-            .ok_or_else(|| keramics_core::error_trace_new!("Missing volume set identifier"))?;
-        assert_eq!(volume_set_identifier.encoding, CharacterEncoding::Ascii);
-        assert_eq!(volume_set_identifier.len(), 0);
+        // The test volume set identifier is empty, hence not set.
+        assert_eq!(volume.get_volume_set_identifier(), None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_format_version() -> Result<(), ErrorTrace> {
+        let volume: CdFsVolume = get_volume()?;
+
+        let format_version: u8 = volume.get_format_version();
+        assert_eq!(format_version, 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_system_identifier() -> Result<(), ErrorTrace> {
+        let volume: CdFsVolume = get_volume()?;
+
+        let system_identifier: Option<&ByteString> = volume.get_system_identifier();
+        let system_identifier: &ByteString = system_identifier
+            .ok_or_else(|| keramics_core::error_trace_new!("Missing system identifier"))?;
+        assert_eq!(system_identifier.encoding, CharacterEncoding::Ascii);
+        assert_eq!(system_identifier.elements.as_slice(), b"LINUX");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_volume_identifier() -> Result<(), ErrorTrace> {
+        let volume: CdFsVolume = get_volume()?;
+
+        let volume_identifier: Option<&ByteString> = volume.get_volume_identifier();
+        let volume_identifier: &ByteString = volume_identifier
+            .ok_or_else(|| keramics_core::error_trace_new!("Missing volume identifier"))?;
+        assert_eq!(volume_identifier.encoding, CharacterEncoding::Ascii);
+        assert_eq!(volume_identifier.elements.as_slice(), b"CDROM");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_volume_size() -> Result<(), ErrorTrace> {
+        let volume: CdFsVolume = get_volume()?;
+
+        let volume_size: u64 = volume.get_volume_size();
+        assert_eq!(volume_size, 2482176);
 
         Ok(())
     }
@@ -322,8 +403,6 @@ mod tests {
         let path_buf: PathBuf = PathBuf::from(path_string.as_str());
         let data_stream: DataStreamReference = open_os_data_stream(&path_buf)?;
         volume.read_data_stream(&data_stream)?;
-
-        // assert_eq!(volume.format_version, 1);
 
         Ok(())
     }

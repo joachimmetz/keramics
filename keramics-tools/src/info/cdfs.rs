@@ -11,10 +11,81 @@
  * under the License.
  */
 
+use std::fmt;
+
 use keramics_core::{DataStreamReference, ErrorTrace};
 use keramics_formats::FileEntryIterator;
-use keramics_formats::cdfs::{CdFsFileEntry, CdFsFileSystem, CdFsVolume};
 use keramics_formats::Path;
+use keramics_formats::cdfs::{CdFsFileEntry, CdFsFileSystem, CdFsVolume};
+
+use crate::formatters::ByteSize;
+
+/// CD file system (CDFS) volume information.
+struct CdFsVolumeInfo<'a> {
+    /// Volume.
+    volume: &'a CdFsVolume,
+}
+
+impl<'a> CdFsVolumeInfo<'a> {
+    /// Creates new volume information.
+    fn new(volume: &'a CdFsVolume) -> Self {
+        Self { volume }
+    }
+}
+
+impl<'a> fmt::Display for CdFsVolumeInfo<'a> {
+    /// Formats volume information for display.
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(formatter, "CD file system (CDFS) volume information:")?;
+        if self.volume.get_format_version() != 0 {
+            writeln!(
+                formatter,
+                "    Format version\t\t\t\t: {}",
+                self.volume.get_format_version()
+            )?;
+        }
+        if let Some(system_identifier) = self.volume.get_system_identifier() {
+            writeln!(
+                formatter,
+                "    System identifier\t\t\t\t: {}",
+                system_identifier
+            )?;
+        }
+        if let Some(volume_identifier) = self.volume.get_volume_identifier() {
+            writeln!(
+                formatter,
+                "    Volume identifier\t\t\t\t: {}",
+                volume_identifier
+            )?;
+        }
+        writeln!(
+            formatter,
+            "    Volumes in set\t\t\t\t: {}",
+            self.volume.get_volumes_in_set()
+        )?;
+        writeln!(
+            formatter,
+            "    Volume set index\t\t\t\t: {}",
+            self.volume.get_volume_set_index()
+        )?;
+        if let Some(volume_set_identifier) = self.volume.get_volume_set_identifier() {
+            writeln!(
+                formatter,
+                "    Volume set identifier\t\t: {}",
+                volume_set_identifier
+            )?;
+        }
+        writeln!(formatter)?;
+        writeln!(
+            formatter,
+            "    Bytes per sector\t\t\t\t: {}",
+            self.volume.get_bytes_per_sector()
+        )?;
+        let byte_size: ByteSize = ByteSize::new(self.volume.get_volume_size(), 1024);
+        writeln!(formatter, "    Size\t\t\t\t\t: {}", byte_size)?;
+        writeln!(formatter)
+    }
+}
 
 /// Information about CD file system (CDFS) format.
 pub struct CdFsInfo {}
@@ -61,8 +132,11 @@ impl CdFsInfo {
                 return Err(error);
             }
         };
-        let _ = cdfs_volume;
-        todo!()
+        let volume_info: CdFsVolumeInfo = CdFsVolumeInfo::new(&cdfs_volume);
+
+        print!("{}", volume_info);
+
+        Ok(())
     }
 
     /// Prints the file entry by path.
@@ -81,10 +155,7 @@ impl CdFsInfo {
             Ok(Some(file_entry)) => file_entry,
             Ok(None) => return Err(keramics_core::error_trace_new!("Missing file entry")),
             Err(mut error) => {
-                keramics_core::error_trace_add_frame!(
-                    error,
-                    "Unable to retrieve file entry"
-                );
+                keramics_core::error_trace_add_frame!(error, "Unable to retrieve file entry");
                 return Err(error);
             }
         };
@@ -193,22 +264,24 @@ impl CdFsInfo {
                     }
                 };
             for sub_file_entry_index in 0..number_of_sub_file_entries {
-                let mut sub_file_entry: CdFsFileEntry = match file_entry.get_sub_file_entry_by_index(sub_file_entry_index) {
-                    Ok(sub_file_entry) => sub_file_entry,
-                    Err(mut error) => {
-                        keramics_core::error_trace_add_frame!(
-                            error,
-                            format!(
-                                "Unable to retrieve sub file entry: {} of path: {}",
-                                sub_file_entry_index, path
-                            )
-                        );
-                        return Err(error);
-                    }
-                };
+                let mut sub_file_entry: CdFsFileEntry =
+                    match file_entry.get_sub_file_entry_by_index(sub_file_entry_index) {
+                        Ok(sub_file_entry) => sub_file_entry,
+                        Err(mut error) => {
+                            keramics_core::error_trace_add_frame!(
+                                error,
+                                format!(
+                                    "Unable to retrieve sub file entry: {} of path: {}",
+                                    sub_file_entry_index, path
+                                )
+                            );
+                            return Err(error);
+                        }
+                    };
                 let is_last: bool = sub_file_entry_index + 1 == number_of_sub_file_entries;
                 levels.push(is_last);
-                match Self::print_hierarchy_file_entry(&mut sub_file_entry, path_components, levels) {
+                match Self::print_hierarchy_file_entry(&mut sub_file_entry, path_components, levels)
+                {
                     Ok(_) => {}
                     Err(mut error) => {
                         keramics_core::error_trace_add_frame!(
@@ -239,10 +312,36 @@ mod tests {
 
     use keramics_core::open_os_data_stream;
 
+    use crate::assert_lines_eq;
+
     fn get_volume_system() -> Result<CdFsVolume, ErrorTrace> {
         let path_buf: PathBuf = PathBuf::from("../test_data/cdfs/level3.iso");
         let data_stream: DataStreamReference = open_os_data_stream(&path_buf)?;
         CdFsInfo::open_volume(&data_stream)
+    }
+
+    #[test]
+    fn test_volume_information_fmt() -> Result<(), ErrorTrace> {
+        let cdfs_volume: CdFsVolume = get_volume_system()?;
+
+        let test_struct: CdFsVolumeInfo = CdFsVolumeInfo::new(&cdfs_volume);
+
+        let expected_string: &str = concat!(
+            "CD file system (CDFS) volume information:\n",
+            "    Format version\t\t\t\t: 1\n",
+            "    System identifier\t\t\t\t: LINUX\n",
+            "    Volume identifier\t\t\t\t: CDROM\n",
+            "    Volumes in set\t\t\t\t: 1\n",
+            "    Volume set index\t\t\t\t: 1\n",
+            "\n",
+            "    Bytes per sector\t\t\t\t: 2048\n",
+            "    Size\t\t\t\t\t: 2.4 MiB (2482176 bytes)\n",
+            "\n"
+        );
+        let string: String = test_struct.to_string();
+        assert_lines_eq!(string.as_str(), expected_string);
+
+        Ok(())
     }
 
     // TODO: add tests for open_volume
