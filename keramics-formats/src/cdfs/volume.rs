@@ -14,8 +14,11 @@
 use std::io::SeekFrom;
 
 use keramics_core::{ByteOrder, DataStreamReference, ErrorTrace};
+use keramics_encodings::CharacterEncoding;
+use keramics_types::ByteString;
 
 use super::constants::*;
+use super::directory_record::CdFsDirectoryRecord;
 use super::path_table::CdFsPathTable;
 use super::volume_descriptor::CdFsVolumeDescriptor;
 
@@ -26,6 +29,18 @@ pub struct CdFsVolume {
 
     /// Bytes per sector.
     bytes_per_sector: u16,
+
+    /// Number of volumes in set.
+    volumes_in_set: u16,
+
+    /// Index of the volume in the set.
+    volume_set_index: u16,
+
+    /// Volume set identifier.
+    volume_set_identifier: Option<ByteString>,
+
+    /// Root directory.
+    root_directory_record: CdFsDirectoryRecord,
 }
 
 impl CdFsVolume {
@@ -34,7 +49,31 @@ impl CdFsVolume {
         Self {
             data_stream: None,
             bytes_per_sector: 0,
+            volumes_in_set: 0,
+            volume_set_index: 0,
+            volume_set_identifier: None,
+            root_directory_record: CdFsDirectoryRecord::new(),
         }
+    }
+
+    /// Retrieves the number of volumes in set.
+    pub fn get_volumes_in_set(&self) -> u16 {
+        self.volumes_in_set
+    }
+
+    /// Retrieves the index of the volume in the set.
+    pub fn get_volume_set_index(&self) -> u16 {
+        self.volume_set_index
+    }
+
+    /// Retrieves the volume set identifier.
+    pub fn get_volume_set_identifier(&self) -> Option<&ByteString> {
+        self.volume_set_identifier.as_ref()
+    }
+
+    /// Retrieves the root directory.
+    pub fn get_root_directory(&self) -> &CdFsDirectoryRecord {
+        &self.root_directory_record
     }
 
     /// Reads the volume from a data stream.
@@ -49,6 +88,11 @@ impl CdFsVolume {
         let mut path_table_size: u32 = 0;
         let mut path_table_start_sector_be: u32 = 0;
         let mut path_table_start_sector_le: u32 = 0;
+        let mut volumes_in_set: u16 = 0;
+        let mut volume_set_index: u16 = 0;
+        let mut volume_set_identifier: Option<ByteString> = None;
+        let mut root_directory_record: CdFsDirectoryRecord = CdFsDirectoryRecord::new();
+        let mut root_directory_record_read: bool = false;
 
         self.bytes_per_sector = 2048;
 
@@ -89,10 +133,36 @@ impl CdFsVolume {
                 path_table_size = volume_descriptor.path_table_size;
                 path_table_start_sector_be = volume_descriptor.path_table_start_sector_be;
                 path_table_start_sector_le = volume_descriptor.path_table_start_sector_le;
+                volumes_in_set = volume_descriptor.volumes_in_set;
+                volume_set_index = volume_descriptor.volume_set_index;
+                let slice: &[u8] = &data[190..318];
+                let mut byte_string: ByteString =
+                    ByteString::new_with_encoding(&CharacterEncoding::Ascii);
+                let trailing: usize =
+                    slice.iter().rev().take_while(|b| **b == 0 || **b == b' ').count();
+                byte_string
+                    .elements
+                    .extend_from_slice(&slice[..slice.len() - trailing]);
+                volume_set_identifier = Some(byte_string);
+                match CdFsDirectoryRecord::read_data(&mut root_directory_record, &data[156..190]) {
+                    Ok(_) => root_directory_record_read = true,
+                    Err(mut error) => {
+                        keramics_core::error_trace_add_frame!(
+                            error,
+                            "Unable to read root directory record"
+                        );
+                        return Err(error);
+                    }
+                }
             }
-            // TODO: compare volume set identifier
-            // TODO: check if volume is part of a set
         }
+        if !root_directory_record_read {
+            return Err(keramics_core::error_trace_new!("Missing root directory record"));
+        }
+        self.volumes_in_set = volumes_in_set;
+        self.volume_set_index = volume_set_index;
+        self.volume_set_identifier = volume_set_identifier;
+        self.root_directory_record = root_directory_record;
         if path_table_size == 0 {
             return Err(keramics_core::error_trace_new!(
                 "Unsupported path table size"
@@ -169,6 +239,66 @@ mod tests {
     use keramics_core::open_os_data_stream;
 
     use crate::tests::get_test_data_path;
+
+    fn get_volume() -> Result<CdFsVolume, ErrorTrace> {
+        let mut volume: CdFsVolume = CdFsVolume::new();
+
+        let path_string: String = get_test_data_path("cdfs/level3.iso");
+        let path_buf: PathBuf = PathBuf::from(path_string.as_str());
+        let data_stream: DataStreamReference = open_os_data_stream(&path_buf)?;
+        volume.read_data_stream(&data_stream)?;
+
+        Ok(volume)
+    }
+
+    #[test]
+    fn test_get_volumes_in_set() -> Result<(), ErrorTrace> {
+        let volume: CdFsVolume = get_volume()?;
+
+        let volumes_in_set: u16 = volume.get_volumes_in_set();
+        assert_eq!(volumes_in_set, 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_volume_set_index() -> Result<(), ErrorTrace> {
+        let volume: CdFsVolume = get_volume()?;
+
+        let volume_set_index: u16 = volume.get_volume_set_index();
+        assert_eq!(volume_set_index, 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_volume_set_identifier() -> Result<(), ErrorTrace> {
+        let volume: CdFsVolume = get_volume()?;
+
+        let volume_set_identifier: Option<&ByteString> = volume.get_volume_set_identifier();
+        let volume_set_identifier: &ByteString = volume_set_identifier
+            .ok_or_else(|| keramics_core::error_trace_new!("Missing volume set identifier"))?;
+        assert_eq!(
+            volume_set_identifier.encoding,
+            CharacterEncoding::Ascii
+        );
+        assert_eq!(volume_set_identifier.len(), 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_root_directory() -> Result<(), ErrorTrace> {
+        let volume: CdFsVolume = get_volume()?;
+
+        let root_directory: &CdFsDirectoryRecord = volume.get_root_directory();
+        assert_eq!(root_directory.data_start_sector, 23);
+        assert_eq!(root_directory.data_size, 2048);
+        assert_eq!(root_directory.file_flags, 0x02);
+        assert!(root_directory.name.is_empty());
+
+        Ok(())
+    }
 
     #[test]
     fn test_read_data_stream() -> Result<(), ErrorTrace> {

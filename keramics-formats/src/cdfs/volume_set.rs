@@ -11,13 +11,16 @@
  * under the License.
  */
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use keramics_core::{DataStreamReference, ErrorTrace};
+use keramics_types::ByteString;
 
 use crate::file_resolver::FileResolverReference;
 use crate::path_component::PathComponent;
 
+use super::file_system::CdFsFileSystem;
 use super::volume::CdFsVolume;
 
 /// CD file system (CDFS) volume set.
@@ -27,6 +30,9 @@ pub struct CdFsVolumeSet {
 
     /// Bytes per sector.
     bytes_per_sector: u16,
+
+    /// Volume set identifier.
+    volume_set_identifier: Option<ByteString>,
 }
 
 impl CdFsVolumeSet {
@@ -35,6 +41,7 @@ impl CdFsVolumeSet {
         Self {
             volumes: Vec::new(),
             bytes_per_sector: 0,
+            volume_set_identifier: None,
         }
     }
 
@@ -57,6 +64,14 @@ impl CdFsVolumeSet {
                 volume_index
             ))),
         }
+    }
+
+    /// Retrieves the file system.
+    pub fn get_file_system(&self) -> Result<CdFsFileSystem, ErrorTrace> {
+        if self.volumes.is_empty() {
+            return Err(keramics_core::error_trace_new!("Missing volumes"));
+        }
+        Ok(CdFsFileSystem::new(&self.volumes))
     }
 
     /// Opens a volume set.
@@ -94,12 +109,63 @@ impl CdFsVolumeSet {
                     return Err(error);
                 }
             }
-            // TODO: compare volume set identifier
+            if self.volumes.is_empty() {
+                self.volume_set_identifier = volume.get_volume_set_identifier().cloned();
+            } else {
+                let expected: Option<&ByteString> = self.volume_set_identifier.as_ref();
+                let actual: Option<&ByteString> = volume.get_volume_set_identifier();
+                if expected != actual {
+                    return Err(keramics_core::error_trace_new!(format!(
+                        "Inconsistent volume set identifier: {:?} expected: {:?}",
+                        actual, expected
+                    )));
+                }
+            }
 
             self.volumes.push(Arc::new(volume));
         }
         self.bytes_per_sector = 2048;
 
+        if self.volumes.is_empty() {
+            return Err(keramics_core::error_trace_new!("Missing volumes"));
+        }
+        let volumes_in_set: u16 = self.volumes[0].get_volumes_in_set();
+
+        if volumes_in_set == 0 {
+            return Err(keramics_core::error_trace_new!(
+                "Unsupported number of volumes in set: 0"
+            ));
+        }
+        let mut volume_set_indices: HashSet<u16> = HashSet::with_capacity(self.volumes.len());
+
+        for volume in self.volumes.iter() {
+            let number_of_volumes_in_set: u16 = volume.get_volumes_in_set();
+            if number_of_volumes_in_set != volumes_in_set {
+                return Err(keramics_core::error_trace_new!(format!(
+                    "Inconsistent number of volumes in set: {} expected: {}",
+                    number_of_volumes_in_set, volumes_in_set
+                )));
+            }
+            let volume_set_index: u16 = volume.get_volume_set_index();
+            if volume_set_index == 0 || volume_set_index > volumes_in_set {
+                return Err(keramics_core::error_trace_new!(format!(
+                    "Unsupported volume set index: {} out of range: 1 through {}",
+                    volume_set_index, volumes_in_set
+                )));
+            }
+            if !volume_set_indices.insert(volume_set_index) {
+                return Err(keramics_core::error_trace_new!(format!(
+                    "Duplicate volume set index: {}",
+                    volume_set_index
+                )));
+            }
+        }
+        if volume_set_indices.len() != volumes_in_set as usize {
+            return Err(keramics_core::error_trace_new!(format!(
+                "Unsupported number of volumes: {} expected: {}",
+                volume_set_indices.len(), volumes_in_set
+            )));
+        }
         Ok(())
     }
 }
@@ -155,6 +221,15 @@ mod tests {
 
         // TODO: implement volume.size
         // assert_eq!(volume.size, 4194304);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_file_system() -> Result<(), ErrorTrace> {
+        let image: CdFsVolumeSet = get_image()?;
+
+        let file_system: CdFsFileSystem = image.get_file_system()?;
 
         Ok(())
     }
