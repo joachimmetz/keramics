@@ -17,6 +17,7 @@ use keramics_core::{DataStreamReference, ErrorTrace};
 use keramics_types::ByteString;
 
 use crate::indexed_hash_map::IndexedHashMap;
+use crate::path_component::PathComponent;
 use crate::traits::FileEntryIterator;
 
 use super::constants::*;
@@ -79,6 +80,65 @@ impl CdFsFileEntry {
     /// Determines if the file entry is the root directory.
     pub fn is_root_directory(&self) -> bool {
         self.directory_record.name.is_empty()
+    }
+
+    /// Determines if a sub file entry name matches the entry name.
+    fn sub_file_entry_name_matches(
+        sub_file_entry_name: &PathComponent,
+        entry_name: &ByteString,
+    ) -> bool {
+        match sub_file_entry_name {
+            PathComponent::Root | PathComponent::Parent | PathComponent::Current => false,
+            _ => {
+                let sub_file_entry_name_string: String =
+                    sub_file_entry_name.to_string().to_ascii_lowercase();
+                let entry_name_string: String = entry_name.to_string().to_ascii_lowercase();
+
+                // CDFS entry names consist of a base name, an extension part and
+                // a version number, e.g. EMPTYFILE.;1 or EMPTYFILE.TXT;1.
+                let entry_name_stem: &str = entry_name_string
+                    .split(';')
+                    .next()
+                    .unwrap_or(entry_name_string.as_str());
+                let entry_name_stem: &str =
+                    entry_name_stem.strip_suffix('.').unwrap_or(entry_name_stem);
+
+                sub_file_entry_name_string == entry_name_stem
+                    || sub_file_entry_name_string == entry_name_string
+            }
+        }
+    }
+
+    /// Retrieves a specific sub file entry by name.
+    pub fn get_sub_file_entry_by_name(
+        &mut self,
+        sub_file_entry_name: &PathComponent,
+    ) -> Result<Option<Self>, ErrorTrace> {
+        if self.is_directory() && !self.sub_directory_records_read {
+            match self.read_sub_directory_records() {
+                Ok(_) => {}
+                Err(mut error) => {
+                    keramics_core::error_trace_add_frame!(
+                        error,
+                        "Unable to read sub directory records"
+                    );
+                    return Err(error);
+                }
+            }
+        }
+        match self
+            .sub_directory_records
+            .iter_mut()
+            .find(|(_, directory_record)| {
+                Self::sub_file_entry_name_matches(sub_file_entry_name, &directory_record.name)
+            }) {
+            Some((_, directory_record)) => Ok(Some(Self::new(
+                &self.data_stream,
+                self.bytes_per_sector,
+                directory_record.clone(),
+            ))),
+            None => Ok(None),
+        }
     }
 
     /// Reads the sub directory records.

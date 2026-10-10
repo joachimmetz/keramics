@@ -15,6 +15,8 @@ use std::sync::Arc;
 
 use keramics_core::{DataStreamReference, ErrorTrace};
 
+use crate::path::Path;
+
 use super::directory_record::CdFsDirectoryRecord;
 use super::file_entry::CdFsFileEntry;
 use super::volume::CdFsVolume;
@@ -39,6 +41,37 @@ impl CdFsFileSystem {
             Some(volume) => Ok(volume.get_root_directory()),
             None => Err(keramics_core::error_trace_new!("Missing volumes")),
         }
+    }
+
+    /// Retrieves the file entry for a specific path.
+    pub fn get_file_entry_by_path(
+        &self,
+        path: &Path,
+    ) -> Result<Option<CdFsFileEntry>, ErrorTrace> {
+        if path.is_empty() || path.is_relative() {
+            return Ok(None);
+        }
+        let mut file_entry: CdFsFileEntry = match self.get_root_file_entry() {
+            Ok(file_entry) => file_entry,
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, "Unable to retrieve root file entry");
+                return Err(error);
+            }
+        };
+        for path_component in path.components[1..].iter() {
+            file_entry = match file_entry.get_sub_file_entry_by_name(path_component) {
+                Ok(Some(file_entry)) => file_entry,
+                Ok(None) => return Ok(None),
+                Err(mut error) => {
+                    keramics_core::error_trace_add_frame!(
+                        error,
+                        format!("Unable to retrieve sub file entry: {}", path_component)
+                    );
+                    return Err(error);
+                }
+            };
+        }
+        Ok(Some(file_entry))
     }
 
     /// Retrieves the root file entry.
@@ -74,6 +107,7 @@ mod tests {
     use keramics_core::{DataStreamReference, open_os_data_stream};
     use keramics_types::ByteString;
 
+    use crate::path::Path;
     use crate::traits::FileEntryIterator;
 
     use crate::tests::get_test_data_path;
@@ -98,6 +132,29 @@ mod tests {
         assert_eq!(root_directory.data_size, 2048);
         assert_eq!(root_directory.file_flags, 0x02);
         assert!(root_directory.name.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_file_entry_by_path() -> Result<(), ErrorTrace> {
+        let file_system: CdFsFileSystem = get_file_system()?;
+
+        let path: Path = Path::from("/");
+        let file_entry: CdFsFileEntry = file_system.get_file_entry_by_path(&path)?.unwrap();
+        assert!(file_entry.is_root_directory());
+
+        let path: Path = Path::from("/emptyfile");
+        let file_entry: CdFsFileEntry = file_system.get_file_entry_by_path(&path)?.unwrap();
+        assert!(!file_entry.is_directory());
+
+        let path: Path = Path::from("/testdir1/testfile1");
+        let file_entry: CdFsFileEntry = file_system.get_file_entry_by_path(&path)?.unwrap();
+        assert!(!file_entry.is_directory());
+
+        let path: Path = Path::from("/nonexistent");
+        let result: Option<CdFsFileEntry> = file_system.get_file_entry_by_path(&path)?;
+        assert!(result.is_none());
 
         Ok(())
     }
