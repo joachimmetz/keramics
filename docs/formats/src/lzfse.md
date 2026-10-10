@@ -117,13 +117,13 @@ is of variable size and consists of:
 | 10.4 | 20 bits | | Number of bytes used to encode literals |
 | 13.0 | 20 bits | | Number of L, M, D values |
 | 15.4 | 3 bits | | Unknown (Final accum_nbits for literals stream) |
-| 14.7 | 1 bit | | Unknown (unused) |
+| 15.7 | 1 bit | | Unknown (unused) |
 | 16.0 | 10 bits | | First literal state |
 | 17.2 | 10 bits | | Second literal state |
 | 18.4 | 10 bits | | Third literal state |
 | 19.6 | 10 bits | | Fourth literal state |
 | 21.0 | 20 bits | | Number of bytes used to encode matches |
-| 22.4 | 3 bits | | Unknown (accum_nbits for the l, m, d stream) |
+| 23.4 | 3 bits | | Unknown (accum_nbits for the l, m, d stream) |
 | 23.7 | 1 bit | | Unknown (unused) |
 | 24.0 | 32 bits | | Block header size |
 | 28.0 | 10 bits | | L value state |

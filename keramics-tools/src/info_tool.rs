@@ -39,10 +39,10 @@ mod storage_media_image;
 
 use crate::enums::{DisplayPathType, EncodingType, FormatType};
 use crate::info::{
-    ApfsInfo, ApmInfo, BdeInfo, BsdDiskLabelInfo, CdsaEncrInfo, CpioInfo, EwfInfo, ExFatInfo,
-    ExtInfo, FatInfo, GptInfo, HfsInfo, LinuxLvmInfo, LuksInfo, MbrInfo, NtfsInfo, PdiInfo,
-    QcowInfo, SgiDiskLabelInfo, SparseBundleInfo, SparseImageInfo, UdifInfo, VdiInfo, VhdInfo,
-    VhdxInfo, VmdkInfo, VolsnapInfo, XfsInfo,
+    ApfsInfo, ApmInfo, BdeInfo, BsdDiskLabelInfo, CdFsInfo, CdsaEncrInfo, CpioInfo, EwfInfo,
+    ExFatInfo, ExtInfo, FatInfo, GptInfo, HfsInfo, LinuxLvmInfo, LuksInfo, MbrInfo, NtfsInfo,
+    PdiInfo, QcowInfo, SgiDiskLabelInfo, SparseBundleInfo, SparseImageInfo, UdifInfo, VdiInfo,
+    VhdInfo, VhdxInfo, VmdkInfo, VolsnapInfo, XfsInfo,
 };
 use crate::range_file_resolver::RangeFileResolver;
 use crate::storage_media_image::StorageMediaImage;
@@ -386,6 +386,7 @@ impl InfoTool {
         format_scanner.add_apm_signatures();
         format_scanner.add_bde_signatures();
         format_scanner.add_bsdlabel_signatures();
+        format_scanner.add_cdfs_signatures();
         format_scanner.add_exfat_signatures();
         format_scanner.add_ext_signatures();
         format_scanner.add_fat_signatures();
@@ -579,6 +580,7 @@ fn main() -> ExitCode {
         Some(FormatType::Apm) => FormatIdentifier::Apm,
         Some(FormatType::Bde) => FormatIdentifier::Bde,
         Some(FormatType::BsdDiskLabel) => FormatIdentifier::BsdDiskLabel,
+        Some(FormatType::CdFs) => FormatIdentifier::CdFs,
         Some(FormatType::CdsaEncr) => FormatIdentifier::CdsaEncr,
         Some(FormatType::Cpio) => FormatIdentifier::Cpio,
         Some(FormatType::Ewf) => FormatIdentifier::Ewf,
@@ -737,6 +739,7 @@ fn main() -> ExitCode {
             FormatIdentifier::Apm => ApmInfo::print_volume_system(&data_stream),
             FormatIdentifier::Bde => BdeInfo::print_encrypted_volume(&data_stream),
             FormatIdentifier::BsdDiskLabel => BsdDiskLabelInfo::print_volume_system(&data_stream),
+            FormatIdentifier::CdFs => CdFsInfo::print_volume(&data_stream),
             FormatIdentifier::CdsaEncr => CdsaEncrInfo::print_container(&data_stream),
             FormatIdentifier::Cpio => CpioInfo::print_archive(&data_stream),
             // TODO: add support for individual EWF segment file.

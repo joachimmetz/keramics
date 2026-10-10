@@ -28,6 +28,7 @@
   * [Volume Shadow Snapshot (volsnap)](volsnap.md)
 * [File system formats](file_system.md)
   * [Apple File System Compression (decmpfs)](decmpfs.md)
+  * [CD file system (cdfs)](cdfs.md)
   * [Extended File System (ext)](ext.md)
   * [Extensible File Allocation Table (exFAT)](exfat.md)
   * [File Allocation Table (FAT)](fat.md)

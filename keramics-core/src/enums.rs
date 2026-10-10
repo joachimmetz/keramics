@@ -12,6 +12,7 @@
  */
 
 /// Byte order.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ByteOrder {
     BigEndian,
     LittleEndian,

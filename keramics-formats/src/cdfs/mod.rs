@@ -11,23 +11,14 @@
  * under the License.
  */
 
-mod apfs;
-mod cdfs;
 pub mod constants;
-mod enums;
-mod epoch;
-mod fat;
-mod filetime;
-mod hfs;
-mod posix;
-mod util;
-mod xfs;
+mod directory_record;
+mod path_table;
+mod path_table_record;
+mod path_table_record_be;
+mod path_table_record_le;
+mod volume;
+mod volume_descriptor;
 
-pub use apfs::ApfsTime;
-pub use cdfs::CdFsDateTime;
-pub use enums::DateTime;
-pub use fat::{FatDate, FatTimeDate, FatTimeDate10Ms};
-pub use filetime::Filetime;
-pub use hfs::HfsTime;
-pub use posix::{PosixTime32, PosixTime64Ns};
-pub use xfs::XfsBigtime;
+pub use path_table::CdFsPathTable;
+pub use volume::CdFsVolume;

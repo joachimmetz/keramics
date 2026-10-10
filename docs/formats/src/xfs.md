@@ -747,7 +747,7 @@ The packed extent (xfs_bmbt_rec_t) is 128 bits of size and consist of:
 | Offset | Size | Value | Description |
 | --- | --- | --- | --- |
 | 0 | 21 bits | | Number of blocks |
-| 2.4 | 52 bits | | Physical block number, which contains a [file system block number](#file_system_block_number) |
+| 2.5 | 52 bits | | Physical block number, which contains a [file system block number](#file_system_block_number) |
 | 9.1 | 54 bits | | Logical block number |
 | 15.7 | 1 bit | | Uninitialized (unwritten) extent |
 
@@ -886,8 +886,8 @@ consists of:
 | Offset | Size | Value | Description |
 | --- | --- | --- | --- |
 | 0 | 8 | | Inode number, which contains an absolute inode number |
-| 9 | 1 | | Name size, which does not include the end-of-string character |
-| 10 | ... | | Name |
+| 8 | 1 | | Name size, which does not include the end-of-string character |
+| 9 | ... | | Name |
 
 #### Short-form directory table entry version 2
 

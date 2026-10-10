@@ -494,7 +494,7 @@ The ext2 and ext3 group descriptor is 32 bytes in size and consists of:
 
 ### The ext4 group descriptor
 
-The ext4 group descriptor is 68 bytes in size and consists of:
+The ext4 group descriptor is 64 bytes in size and consists of:
 
 <!-- rumdl-disable MD033 MD056 -->
 
@@ -522,8 +522,8 @@ The ext4 group descriptor is 68 bytes in size and consists of:
 | 50 | 2 | | Number of unused inodes, which contains the upper 16-bit of the value |
 | 52 | 4 | | Exclude bitmap block number, which contains the upper 32-bit of the value. The block number is relative from the start of the volume |
 | 56 | 2 | | Block bitmap checksum, which contains the upper 16-bit of the value |
-| 60 | 2 | | Inode bitmap checksum, which contains the upper 16-bit of the value |
-| 64 | 4 | | Unknown (padding) |
+| 58 | 2 | | Inode bitmap checksum, which contains the upper 16-bit of the value |
+| 60 | 4 | | Unknown (padding) |
 
 <!-- rumdl-enable MD033 MD056 -->
 

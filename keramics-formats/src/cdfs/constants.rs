@@ -11,23 +11,8 @@
  * under the License.
  */
 
-mod apfs;
-mod cdfs;
-pub mod constants;
-mod enums;
-mod epoch;
-mod fat;
-mod filetime;
-mod hfs;
-mod posix;
-mod util;
-mod xfs;
+/// CDFS volume descriptor signature.
+pub(crate) const CDFS_VOLUME_DESCRIPTOR_SIGNATURE: &[u8; 5] = b"CD001";
 
-pub use apfs::ApfsTime;
-pub use cdfs::CdFsDateTime;
-pub use enums::DateTime;
-pub use fat::{FatDate, FatTimeDate, FatTimeDate10Ms};
-pub use filetime::Filetime;
-pub use hfs::HfsTime;
-pub use posix::{PosixTime32, PosixTime64Ns};
-pub use xfs::XfsBigtime;
+/// CDFS volume descriptor set terminator.
+pub(super) const CDFS_VOLUME_DESCRIPTOR_SET_TERMINATOR: &[u8; 6] = b"\xffCD001";

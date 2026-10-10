@@ -1078,9 +1078,9 @@ The raw sector size of a MODE-1 CD-ROM is 2352 bytes in size and consists of:
 | --- | --- | --- | --- |
 | 0 | 16 | | Synchronization bytes |
 | 16 | 2048 | | Data |
-| 2054 | 4 | | Error detection |
-| 2058 | 8 | 0x00 | Unknown (Empty values) |
-| 2066 | 276 | | Error correction |
+| 2064 | 4 | | Error detection |
+| 2068 | 8 | 0x00 | Unknown (Empty values) |
+| 2076 | 276 | | Error correction |
 
 TODO: add information about Mode-2 and Mode-XA
 
