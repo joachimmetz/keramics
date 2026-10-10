@@ -15,7 +15,7 @@ use keramics_core::ErrorTrace;
 use keramics_encodings::CharacterEncoding;
 use keramics_layout_map::LayoutMap;
 use keramics_types::{
-    bytes_to_u16_be, bytes_to_u16_le, bytes_to_u32_be, bytes_to_u32_le, ByteString,
+    ByteString, bytes_to_u16_be, bytes_to_u16_le, bytes_to_u32_be, bytes_to_u32_le,
 };
 
 use super::constants::*;

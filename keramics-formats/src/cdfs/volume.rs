@@ -22,7 +22,7 @@ use super::constants::*;
 use super::directory_record::CdFsDirectoryRecord;
 use super::file_system::CdFsFileSystem;
 use super::path_table::CdFsPathTable;
-use super::volume_descriptor::{read_trimmed_string, CdFsVolumeDescriptor};
+use super::volume_descriptor::{CdFsVolumeDescriptor, read_trimmed_string};
 
 #[derive(Clone)]
 /// CD file system (CDFS) volume.
@@ -56,6 +56,9 @@ pub struct CdFsVolume {
 
     /// Root directory.
     root_directory_record: CdFsDirectoryRecord,
+
+    /// Offset of the root directory record in the data stream.
+    root_directory_record_offset: u64,
 }
 
 impl CdFsVolume {
@@ -72,6 +75,7 @@ impl CdFsVolume {
             volume_set_index: 0,
             volume_set_identifier: None,
             root_directory_record: CdFsDirectoryRecord::new(),
+            root_directory_record_offset: 0,
         }
     }
 
@@ -125,6 +129,11 @@ impl CdFsVolume {
         &self.root_directory_record
     }
 
+    /// Retrieves the offset of the root directory record in the data stream.
+    pub(super) fn get_root_directory_record_offset(&self) -> u64 {
+        self.root_directory_record_offset
+    }
+
     /// Retrieves the file system.
     pub fn get_file_system(&self) -> Result<CdFsFileSystem, ErrorTrace> {
         if self.data_stream.is_none() {
@@ -155,6 +164,7 @@ impl CdFsVolume {
         let mut volume_set_index: u16 = 0;
         let mut volume_set_identifier: Option<ByteString> = None;
         let mut root_directory_record: CdFsDirectoryRecord = CdFsDirectoryRecord::new();
+        let mut root_directory_record_offset: u64 = 0;
         let mut root_directory_record_read: bool = false;
 
         self.bytes_per_sector = 2048;
@@ -196,6 +206,7 @@ impl CdFsVolume {
                 format_version = volume_descriptor.format_version;
                 volume_size =
                     (volume_descriptor.volume_size as u64) * (self.bytes_per_sector as u64);
+                root_directory_record_offset = offset - self.bytes_per_sector as u64 + 156;
                 system_identifier = read_trimmed_string(&data, 8, 32);
                 volume_identifier = read_trimmed_string(&data, 40, 32);
                 path_table_size = volume_descriptor.path_table_size;
@@ -229,6 +240,7 @@ impl CdFsVolume {
         self.volume_set_index = volume_set_index;
         self.volume_set_identifier = volume_set_identifier;
         self.root_directory_record = root_directory_record;
+        self.root_directory_record_offset = root_directory_record_offset;
         if path_table_size == 0 {
             return Err(keramics_core::error_trace_new!(
                 "Unsupported path table size"

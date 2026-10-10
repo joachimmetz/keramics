@@ -16,6 +16,7 @@ use std::sync::Arc;
 use keramics_core::{DataStreamReference, ErrorTrace};
 
 use crate::path::Path;
+use crate::traits::FileEntryIterator;
 
 use super::directory_record::CdFsDirectoryRecord;
 use super::file_entry::CdFsFileEntry;
@@ -83,15 +84,103 @@ impl CdFsFileSystem {
                 };
                 let bytes_per_sector: u16 = volume.get_bytes_per_sector();
                 let directory_record: CdFsDirectoryRecord = volume.get_root_directory().clone();
+                let directory_record_offset: u64 = volume.get_root_directory_record_offset();
 
                 Ok(CdFsFileEntry::new(
                     data_stream,
                     bytes_per_sector,
                     directory_record,
+                    directory_record_offset,
                 ))
             }
             None => Err(keramics_core::error_trace_new!("Missing volumes")),
         }
+    }
+
+    /// Retrieves the file entry for a specific identifier, i.e. the offset of the directory
+    /// record.
+    pub fn get_file_entry_by_identifier(
+        &self,
+        cdfs_entry_identifier: u64,
+    ) -> Result<CdFsFileEntry, ErrorTrace> {
+        let file_entry: CdFsFileEntry = match self.get_root_file_entry() {
+            Ok(file_entry) => file_entry,
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, "Unable to retrieve root file entry");
+                return Err(error);
+            }
+        };
+        match Self::get_file_entry_by_identifier_recursive(file_entry, cdfs_entry_identifier) {
+            Ok(Some(file_entry)) => Ok(file_entry),
+            Ok(None) => Err(keramics_core::error_trace_new!(format!(
+                "Missing file entry for identifier: 0x{:08x}",
+                cdfs_entry_identifier
+            ))),
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(
+                    error,
+                    format!(
+                        "Unable to retrieve file entry: 0x{:08x}",
+                        cdfs_entry_identifier
+                    )
+                );
+                return Err(error);
+            }
+        }
+    }
+
+    /// Recursively searches for a file entry with a specific identifier.
+    fn get_file_entry_by_identifier_recursive(
+        mut file_entry: CdFsFileEntry,
+        cdfs_entry_identifier: u64,
+    ) -> Result<Option<CdFsFileEntry>, ErrorTrace> {
+        if file_entry.get_identifier() == cdfs_entry_identifier {
+            return Ok(Some(file_entry));
+        }
+        if file_entry.is_directory() {
+            let number_of_sub_file_entries: usize =
+                match file_entry.get_number_of_sub_file_entries() {
+                    Ok(number) => number,
+                    Err(mut error) => {
+                        keramics_core::error_trace_add_frame!(
+                            error,
+                            "Unable to retrieve number of sub file entries"
+                        );
+                        return Err(error);
+                    }
+                };
+            for sub_file_entry_index in 0..number_of_sub_file_entries {
+                let sub_file_entry: CdFsFileEntry =
+                    match file_entry.get_sub_file_entry_by_index(sub_file_entry_index) {
+                        Ok(sub_file_entry) => sub_file_entry,
+                        Err(mut error) => {
+                            keramics_core::error_trace_add_frame!(
+                                error,
+                                format!(
+                                    "Unable to retrieve sub file entry: {}",
+                                    sub_file_entry_index
+                                )
+                            );
+                            return Err(error);
+                        }
+                    };
+                match Self::get_file_entry_by_identifier_recursive(
+                    sub_file_entry,
+                    cdfs_entry_identifier,
+                ) {
+                    Ok(Some(file_entry)) => return Ok(Some(file_entry)),
+                    Ok(None) => {}
+                    Err(mut error) => {
+                        keramics_core::error_trace_add_frame!(
+                            error,
+                            format!("Unable to search sub file entry: {}", sub_file_entry_index)
+                        );
+                        return Err(error);
+                    }
+                }
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -174,6 +263,25 @@ mod tests {
         let name: &ByteString =
             name.ok_or_else(|| keramics_core::error_trace_new!("Missing name"))?;
         assert_eq!(name.elements, b"EMPTYFILE.;1".to_vec());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_file_entry_by_identifier() -> Result<(), ErrorTrace> {
+        let file_system: CdFsFileSystem = get_file_system()?;
+
+        let file_entry: CdFsFileEntry = file_system.get_file_entry_by_identifier(32924)?;
+        assert!(file_entry.is_root_directory());
+
+        let path: Path = Path::from("/emptyfile");
+        let file_entry_by_path: CdFsFileEntry = file_system.get_file_entry_by_path(&path)?.unwrap();
+        let file_entry: CdFsFileEntry =
+            file_system.get_file_entry_by_identifier(file_entry_by_path.get_identifier())?;
+        assert_eq!(file_entry.get_name(), file_entry_by_path.get_name());
+
+        let result: Result<CdFsFileEntry, ErrorTrace> = file_system.get_file_entry_by_identifier(1);
+        assert!(result.is_err());
 
         Ok(())
     }

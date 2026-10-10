@@ -643,6 +643,9 @@ fn main() -> ExitCode {
                 command_arguments.volume,
                 command_arguments.entry,
             ),
+            FormatIdentifier::CdFs => {
+                CdFsInfo::print_file_entry_by_identifier(&data_stream, command_arguments.entry)
+            }
             FormatIdentifier::ExFat => {
                 ExFatInfo::print_file_entry_by_identifier(&data_stream, command_arguments.entry)
             }

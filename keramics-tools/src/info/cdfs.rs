@@ -87,6 +87,36 @@ impl<'a> fmt::Display for CdFsVolumeInfo<'a> {
     }
 }
 
+/// CD file system (CDFS) file entry information.
+struct CdFsFileEntryInfo<'a> {
+    /// File entry.
+    file_entry: &'a CdFsFileEntry,
+}
+
+impl<'a> CdFsFileEntryInfo<'a> {
+    /// Creates new file entry information.
+    fn new(file_entry: &'a CdFsFileEntry) -> Self {
+        Self { file_entry }
+    }
+}
+
+impl<'a> fmt::Display for CdFsFileEntryInfo<'a> {
+    /// Formats file entry information for display.
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(
+            formatter,
+            "    Identifier\t\t\t\t\t: 0x{:08x}",
+            self.file_entry.get_identifier()
+        )?;
+        if let Some(name) = self.file_entry.get_name() {
+            writeln!(formatter, "    Name\t\t\t\t\t: {}", name)?;
+        }
+        let byte_size: ByteSize = ByteSize::new(self.file_entry.get_size(), 1024);
+        writeln!(formatter, "    Size\t\t\t\t\t: {}", byte_size)?;
+        writeln!(formatter)
+    }
+}
+
 /// Information about CD file system (CDFS) format.
 pub struct CdFsInfo {}
 
@@ -163,10 +193,44 @@ impl CdFsInfo {
 
         println!("    Path\t\t\t\t\t: {}", path);
 
-        if let Some(name) = file_entry.get_name() {
-            println!("    Name\t\t\t\t\t: {}", name);
-        }
-        println!("    Size\t\t\t\t\t: {}", file_entry.get_size());
+        let file_entry_information: CdFsFileEntryInfo = CdFsFileEntryInfo::new(&file_entry);
+
+        print!("{}", file_entry_information);
+
+        Ok(())
+    }
+
+    /// Prints the file entry by identifier, i.e. the offset of the directory record.
+    pub fn print_file_entry_by_identifier(
+        data_stream: &DataStreamReference,
+        cdfs_entry_identifier: u64,
+    ) -> Result<(), ErrorTrace> {
+        let cdfs_file_system: CdFsFileSystem = match Self::get_file_system(data_stream) {
+            Ok(cdfs_file_system) => cdfs_file_system,
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, "Unable to open file system");
+                return Err(error);
+            }
+        };
+        let file_entry: CdFsFileEntry =
+            match cdfs_file_system.get_file_entry_by_identifier(cdfs_entry_identifier) {
+                Ok(file_entry) => file_entry,
+                Err(mut error) => {
+                    keramics_core::error_trace_add_frame!(
+                        error,
+                        format!(
+                            "Unable to retrieve file entry: 0x{:08x}",
+                            cdfs_entry_identifier
+                        )
+                    );
+                    return Err(error);
+                }
+            };
+        println!("CD file system (CDFS) file entry information:");
+
+        let file_entry_information: CdFsFileEntryInfo = CdFsFileEntryInfo::new(&file_entry);
+
+        print!("{}", file_entry_information);
 
         Ok(())
     }
@@ -344,6 +408,29 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn test_file_entry_information_fmt() -> Result<(), ErrorTrace> {
+        let cdfs_volume: CdFsVolume = get_volume_system()?;
+        let cdfs_file_system: CdFsFileSystem = cdfs_volume.get_file_system()?;
+
+        let file_entry: CdFsFileEntry = cdfs_file_system.get_file_entry_by_identifier(47172)?;
+
+        let test_struct: CdFsFileEntryInfo = CdFsFileEntryInfo::new(&file_entry);
+
+        let expected_string: &str = concat!(
+            "    Identifier\t\t\t\t\t: 0x0000b844\n",
+            "    Name\t\t\t\t\t: EMPTYFILE.;1\n",
+            "    Size\t\t\t\t\t: 0 bytes\n",
+            "\n"
+        );
+        let string: String = test_struct.to_string();
+        assert_lines_eq!(string.as_str(), expected_string);
+
+        Ok(())
+    }
+
     // TODO: add tests for open_volume
     // TODO: add tests for print_volume
+    // TODO: add tests for print_file_entry_by_path
+    // TODO: add tests for print_file_entry_by_identifier
 }

@@ -11,6 +11,7 @@
  * under the License.
  */
 
+use std::collections::HashMap;
 use std::io::SeekFrom;
 
 use keramics_core::{DataStreamReference, ErrorTrace};
@@ -34,8 +35,14 @@ pub struct CdFsFileEntry {
     /// The directory record.
     directory_record: CdFsDirectoryRecord,
 
+    /// The offset of the directory record.
+    directory_record_offset: u64,
+
     /// The sub directory records.
     sub_directory_records: IndexedHashMap<ByteString, CdFsDirectoryRecord>,
+
+    /// The offsets of the sub directory records per name.
+    sub_directory_record_offsets: HashMap<ByteString, u64>,
 
     /// Value to indicate the sub directory records were read.
     sub_directory_records_read: bool,
@@ -47,14 +54,22 @@ impl CdFsFileEntry {
         data_stream: &DataStreamReference,
         bytes_per_sector: u16,
         directory_record: CdFsDirectoryRecord,
+        directory_record_offset: u64,
     ) -> Self {
         Self {
             data_stream: data_stream.clone(),
             bytes_per_sector,
             directory_record,
+            directory_record_offset,
             sub_directory_records: IndexedHashMap::new(),
+            sub_directory_record_offsets: HashMap::new(),
             sub_directory_records_read: false,
         }
+    }
+
+    /// Retrieves the identifier, i.e. the offset of the directory record.
+    pub fn get_identifier(&self) -> u64 {
+        self.directory_record_offset
     }
 
     /// Retrieves the name.
@@ -132,11 +147,18 @@ impl CdFsFileEntry {
             .find(|(_, directory_record)| {
                 Self::sub_file_entry_name_matches(sub_file_entry_name, &directory_record.name)
             }) {
-            Some((_, directory_record)) => Ok(Some(Self::new(
-                &self.data_stream,
-                self.bytes_per_sector,
-                directory_record.clone(),
-            ))),
+            Some((name, directory_record)) => {
+                let sub_file_entry_offset: u64 = match self.sub_directory_record_offsets.get(name) {
+                    Some(offset) => *offset,
+                    None => directory_record.data_start_sector as u64,
+                };
+                Ok(Some(Self::new(
+                    &self.data_stream,
+                    self.bytes_per_sector,
+                    directory_record.clone(),
+                    sub_file_entry_offset,
+                )))
+            }
             None => Ok(None),
         }
     }
@@ -198,6 +220,8 @@ impl CdFsFileEntry {
             }
             // Skip the directory itself and the parent directory entries ".", "..".
             if !directory_record.name.is_empty() && directory_record.name.len() != 1 {
+                self.sub_directory_record_offsets
+                    .insert(directory_record.name.clone(), offset + data_offset as u64);
                 self.sub_directory_records
                     .insert(directory_record.name.clone(), directory_record);
             }
@@ -246,13 +270,20 @@ impl FileEntryIterator for CdFsFileEntry {
         }
         match self
             .sub_directory_records
-            .get_value_by_index(sub_file_entry_index)
+            .get_key_value_by_index(sub_file_entry_index)
         {
-            Some(directory_record) => Ok(Self::new(
-                &self.data_stream,
-                self.bytes_per_sector,
-                directory_record.clone(),
-            )),
+            Some((name, directory_record)) => {
+                let sub_file_entry_offset: u64 = match self.sub_directory_record_offsets.get(name) {
+                    Some(offset) => *offset,
+                    None => directory_record.data_start_sector as u64,
+                };
+                Ok(Self::new(
+                    &self.data_stream,
+                    self.bytes_per_sector,
+                    directory_record.clone(),
+                    sub_file_entry_offset,
+                ))
+            }
             None => Err(keramics_core::error_trace_new!(format!(
                 "Unable to retrieve sub file entry: {}",
                 sub_file_entry_index
@@ -289,12 +320,27 @@ mod tests {
         };
         let bytes_per_sector: u16 = volume.get_bytes_per_sector();
         let directory_record: CdFsDirectoryRecord = volume.get_root_directory().clone();
+        let directory_record_offset: u64 = volume.get_root_directory_record_offset();
 
         Ok(CdFsFileEntry::new(
             data_stream,
             bytes_per_sector,
             directory_record,
+            directory_record_offset,
         ))
+    }
+
+    #[test]
+    fn test_get_identifier() -> Result<(), ErrorTrace> {
+        let mut file_entry: CdFsFileEntry = get_file_entry()?;
+
+        assert_eq!(file_entry.get_identifier(), 32924);
+
+        let mut sub_file_entry: CdFsFileEntry = file_entry.get_sub_file_entry_by_index(0)?;
+
+        assert_eq!(sub_file_entry.get_identifier(), 47172);
+
+        Ok(())
     }
 
     #[test]
