@@ -12,7 +12,9 @@
  */
 
 use keramics_core::{DataStreamReference, ErrorTrace};
-use keramics_formats::cdfs::CdFsVolume;
+use keramics_formats::FileEntryIterator;
+use keramics_formats::cdfs::{CdFsFileEntry, CdFsFileSystem, CdFsVolume};
+use keramics_formats::Path;
 
 /// Information about CD file system (CDFS) format.
 pub struct CdFsInfo {}
@@ -32,6 +34,24 @@ impl CdFsInfo {
         Ok(cdfs_volume)
     }
 
+    /// Retrieves a file system.
+    fn get_file_system(data_stream: &DataStreamReference) -> Result<CdFsFileSystem, ErrorTrace> {
+        let cdfs_volume: CdFsVolume = match Self::open_volume(data_stream) {
+            Ok(cdfs_volume) => cdfs_volume,
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, "Unable to open volume");
+                return Err(error);
+            }
+        };
+        match cdfs_volume.get_file_system() {
+            Ok(cdfs_file_system) => Ok(cdfs_file_system),
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, "Unable to retrieve file system");
+                return Err(error);
+            }
+        }
+    }
+
     /// Prints information about a volume.
     pub fn print_volume(data_stream: &DataStreamReference) -> Result<(), ErrorTrace> {
         let cdfs_volume: CdFsVolume = match Self::open_volume(data_stream) {
@@ -41,7 +61,173 @@ impl CdFsInfo {
                 return Err(error);
             }
         };
+        let _ = cdfs_volume;
         todo!()
+    }
+
+    /// Prints the file entry by path.
+    pub fn print_file_entry_by_path(
+        data_stream: &DataStreamReference,
+        path: &Path,
+    ) -> Result<(), ErrorTrace> {
+        let cdfs_file_system: CdFsFileSystem = match Self::get_file_system(data_stream) {
+            Ok(cdfs_file_system) => cdfs_file_system,
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, "Unable to open file system");
+                return Err(error);
+            }
+        };
+        let file_entry: CdFsFileEntry = match cdfs_file_system.get_file_entry_by_path(path) {
+            Ok(Some(file_entry)) => file_entry,
+            Ok(None) => return Err(keramics_core::error_trace_new!("Missing file entry")),
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(
+                    error,
+                    "Unable to retrieve file entry"
+                );
+                return Err(error);
+            }
+        };
+        println!("CD file system (CDFS) file entry information:");
+
+        println!("    Path\t\t\t\t\t: {}", path);
+
+        if let Some(name) = file_entry.get_name() {
+            println!("    Name\t\t\t\t\t: {}", name);
+        }
+        println!("    Size\t\t\t\t\t: {}", file_entry.get_size());
+
+        Ok(())
+    }
+
+    /// Prints the file system hierarchy.
+    pub fn print_hierarchy(
+        data_stream: &DataStreamReference,
+        path: Option<&String>,
+    ) -> Result<(), ErrorTrace> {
+        let cdfs_file_system: CdFsFileSystem = match Self::get_file_system(data_stream) {
+            Ok(cdfs_file_system) => cdfs_file_system,
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, "Unable to open file system");
+                return Err(error);
+            }
+        };
+        println!("CD file system (CDFS) hierarchy:");
+
+        let mut file_entry: CdFsFileEntry = match path {
+            Some(path) => match cdfs_file_system.get_file_entry_by_path(&Path::from(path)) {
+                Ok(Some(file_entry)) => file_entry,
+                Ok(None) => {
+                    return Err(keramics_core::error_trace_new!(format!(
+                        "Missing file entry for path: {}",
+                        path
+                    )));
+                }
+                Err(mut error) => {
+                    keramics_core::error_trace_add_frame!(
+                        error,
+                        format!("Unable to retrieve file entry for path: {}", path)
+                    );
+                    return Err(error);
+                }
+            },
+            None => match cdfs_file_system.get_root_file_entry() {
+                Ok(file_entry) => file_entry,
+                Err(mut error) => {
+                    keramics_core::error_trace_add_frame!(
+                        error,
+                        "Unable to retrieve root file entry"
+                    );
+                    return Err(error);
+                }
+            },
+        };
+        let mut path_components: Vec<String> = Vec::new();
+        let mut levels: Vec<bool> = Vec::new();
+
+        match Self::print_hierarchy_file_entry(&mut file_entry, &mut path_components, &mut levels) {
+            Ok(_) => {}
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(
+                    error,
+                    "Unable to print file entry hierarchy"
+                );
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    /// Prints the file entry hierarchy.
+    fn print_hierarchy_file_entry(
+        file_entry: &mut CdFsFileEntry,
+        path_components: &mut Vec<String>,
+        levels: &mut Vec<bool>,
+    ) -> Result<(), ErrorTrace> {
+        let path: String = if file_entry.is_root_directory() {
+            String::from("/")
+        } else {
+            let name_string: String = match file_entry.get_name() {
+                Some(name) => name.to_string(),
+                None => String::new(),
+            };
+            path_components.push(name_string);
+            format!("/{}", path_components.join("/"))
+        };
+        let prefix: String = crate::hierarchy::get_hierarchy_prefix(levels);
+        println!("{}{}", prefix, path);
+
+        if file_entry.is_directory() {
+            let number_of_sub_file_entries: usize =
+                match file_entry.get_number_of_sub_file_entries() {
+                    Ok(number) => number,
+                    Err(mut error) => {
+                        keramics_core::error_trace_add_frame!(
+                            error,
+                            format!(
+                                "Unable to retrieve number of sub file entries of path: {}",
+                                path
+                            )
+                        );
+                        return Err(error);
+                    }
+                };
+            for sub_file_entry_index in 0..number_of_sub_file_entries {
+                let mut sub_file_entry: CdFsFileEntry = match file_entry.get_sub_file_entry_by_index(sub_file_entry_index) {
+                    Ok(sub_file_entry) => sub_file_entry,
+                    Err(mut error) => {
+                        keramics_core::error_trace_add_frame!(
+                            error,
+                            format!(
+                                "Unable to retrieve sub file entry: {} of path: {}",
+                                sub_file_entry_index, path
+                            )
+                        );
+                        return Err(error);
+                    }
+                };
+                let is_last: bool = sub_file_entry_index + 1 == number_of_sub_file_entries;
+                levels.push(is_last);
+                match Self::print_hierarchy_file_entry(&mut sub_file_entry, path_components, levels) {
+                    Ok(_) => {}
+                    Err(mut error) => {
+                        keramics_core::error_trace_add_frame!(
+                            error,
+                            format!(
+                                "Unable to print hierarchy of sub file entry: {} of path: {}",
+                                sub_file_entry_index, path
+                            )
+                        );
+                        return Err(error);
+                    }
+                }
+                levels.pop();
+            }
+        }
+        if !file_entry.is_root_directory() {
+            path_components.pop();
+        }
+        Ok(())
     }
 }
 

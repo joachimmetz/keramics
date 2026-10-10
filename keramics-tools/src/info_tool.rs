@@ -677,6 +677,9 @@ fn main() -> ExitCode {
                 &command_arguments.volume_path_type,
                 command_arguments.path.as_ref(),
             ),
+            FormatIdentifier::CdFs => {
+                CdFsInfo::print_hierarchy(&data_stream, command_arguments.path.as_ref())
+            }
             FormatIdentifier::ExFat => {
                 ExFatInfo::print_hierarchy(&data_stream, command_arguments.path.as_ref())
             }
@@ -714,6 +717,7 @@ fn main() -> ExitCode {
                     command_arguments.volume,
                     &path,
                 ),
+                FormatIdentifier::CdFs => CdFsInfo::print_file_entry_by_path(&data_stream, &path),
                 FormatIdentifier::ExFat => ExFatInfo::print_file_entry_by_path(&data_stream, &path),
                 FormatIdentifier::Ext => ExtInfo::print_file_entry_by_path(
                     &data_stream,

@@ -12,6 +12,7 @@
  */
 
 use std::io::SeekFrom;
+use std::sync::Arc;
 
 use keramics_core::{ByteOrder, DataStreamReference, ErrorTrace};
 use keramics_encodings::CharacterEncoding;
@@ -19,9 +20,11 @@ use keramics_types::ByteString;
 
 use super::constants::*;
 use super::directory_record::CdFsDirectoryRecord;
+use super::file_system::CdFsFileSystem;
 use super::path_table::CdFsPathTable;
 use super::volume_descriptor::CdFsVolumeDescriptor;
 
+#[derive(Clone)]
 /// CD file system (CDFS) volume.
 pub struct CdFsVolume {
     /// Data stream.
@@ -84,6 +87,16 @@ impl CdFsVolume {
     /// Retrieves the root directory.
     pub(super) fn get_root_directory(&self) -> &CdFsDirectoryRecord {
         &self.root_directory_record
+    }
+
+    /// Retrieves the file system.
+    pub fn get_file_system(&self) -> Result<CdFsFileSystem, ErrorTrace> {
+        if self.data_stream.is_none() {
+            return Err(keramics_core::error_trace_new!("Missing data stream"));
+        }
+        let volumes: [Arc<CdFsVolume>; 1] = [Arc::new(self.clone())];
+
+        Ok(CdFsFileSystem::new(&volumes))
     }
 
     /// Reads the volume from a data stream.
