@@ -11,20 +11,21 @@
  * under the License.
  */
 
-pub mod constants;
-mod directory_record;
-mod file_entry;
-mod file_system;
-mod path_table;
-mod path_table_record;
-mod path_table_record_be;
-mod path_table_record_le;
-mod volume;
-mod volume_descriptor;
-mod volume_set;
+use std::sync::Arc;
 
-pub use file_entry::CdFsFileEntry;
-pub use file_system::CdFsFileSystem;
-pub use path_table::CdFsPathTable;
-pub use volume::CdFsVolume;
-pub use volume_set::CdFsVolumeSet;
+use super::volume::CdFsVolume;
+
+/// CD file system (CDFS) file system.
+pub struct CdFsFileSystem {
+    /// Layers.
+    volumes: Vec<Arc<CdFsVolume>>,
+}
+
+impl CdFsFileSystem {
+    /// Creates a new file system.
+    pub(super) fn new(volumes: &[Arc<CdFsVolume>]) -> Self {
+        Self {
+            volumes: volumes.to_vec(),
+        }
+    }
+}

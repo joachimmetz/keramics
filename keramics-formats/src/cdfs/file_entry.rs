@@ -11,20 +11,12 @@
  * under the License.
  */
 
-pub mod constants;
-mod directory_record;
-mod file_entry;
-mod file_system;
-mod path_table;
-mod path_table_record;
-mod path_table_record_be;
-mod path_table_record_le;
-mod volume;
-mod volume_descriptor;
-mod volume_set;
+/// CD file system (CDFS) file entry.
+pub struct CdFsFileEntry {}
 
-pub use file_entry::CdFsFileEntry;
-pub use file_system::CdFsFileSystem;
-pub use path_table::CdFsPathTable;
-pub use volume::CdFsVolume;
-pub use volume_set::CdFsVolumeSet;
+impl CdFsFileEntry {
+    /// Creates a new file entry.
+    pub(super) fn new() -> Self {
+        Self {}
+    }
+}
