@@ -1489,10 +1489,10 @@ The journal header is 44 bytes in size and consists of:
 
 #### First and next transaction offset
 
-The first transaction offset contains the offset in bytes from the start of the journal header to
+The first transaction offset contains the offset relative from the start of the journal header to
 the start of the first (oldest) transaction.
 
-The next transaction offset contains the offset in bytes from the start of the journal header to
+The next transaction offset contains the offset relative from the start of the journal header to
 the end of the last (newest) transaction. Note that this field may be less than the start field,
 indicating that the transactions wrap around the end of the journal's circular buffer. If end
 equals start, then the journal is empty, and there are no transactions that need to be replayed.

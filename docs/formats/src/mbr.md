@@ -44,7 +44,7 @@ The Cylinder Head Sector (CHS) address is 24 bits in size and consists of:
 | --- | --- | --- | --- |
 | 0.0  | 8 bits | | Head |
 | 1.0  | 6 bits | | Sector |
-| 1.5 | 10 bits | | Cylinder |
+| 1.6 | 10 bits | | Cylinder |
 
 The logical block address (LBA) can be determined from the CHS with the following calculation:
 

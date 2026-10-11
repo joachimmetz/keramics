@@ -64,6 +64,7 @@ pub mod volsnap;
 pub mod apfs;
 
 // File system formats
+pub mod cdfs;
 pub mod exfat;
 pub mod ext;
 pub mod fat;

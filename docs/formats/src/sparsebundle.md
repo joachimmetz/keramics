@@ -38,10 +38,10 @@ the following key-value pairs.
 | Identifier | Value | Description |
 | --- | --- | --- |
 | CFBundleInfoDictionaryVersion | "6.0" | The information property list format version |
-| band-size | | The maximum size of a band file in bytes |
+| band-size | | The maximum size of a band file, in bytes |
 | bundle-backingstore-version | 1 | Unknown |
 | diskimage-bundle-type | "com.apple.diskimage.sparsebundle" | The bundle type |
-| size | | The media size in bytes |
+| size | | The media size, in bytes |
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>

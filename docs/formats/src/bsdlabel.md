@@ -65,8 +65,8 @@ The BSD disklabel is of variable size and consists of:
 | 132 | 4 | "WEV\x82" | Signature |
 | 136 | 2 | | Checksum, which contains a XOR of the BSD disklabel |
 | 138 | 2 | | Number of partition entries, should not exceed 16 (MAXPARTITIONS) |
-| 140 | 4 | | Boot area size in bytes |
-| 144 | 4 | | Maximum superblock size in bytes |
+| 140 | 4 | | Boot area size, in bytes |
+| 144 | 4 | | Maximum superblock size, in bytes |
 | 148 | number of partitions x 16 | | Array of [partition entries](#partition_entry) |
 
 > Note that the number of partition entries contains the total number of entries in the array, not

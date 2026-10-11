@@ -21,6 +21,7 @@ use keramics_sigscan::{PatternType, ScanContext, Scanner, Signature};
 use super::apfs::constants::*;
 use super::bde::constants::*;
 use super::bsdlabel::constants::*;
+use super::cdfs::constants::*;
 use super::cdsaencr::constants::*;
 use super::enums::FormatIdentifier;
 use super::ewf::constants::*;
@@ -133,6 +134,16 @@ impl FormatScanner {
             PatternType::BoundToStart,
             512,
             BSD_DISKLABEL_SIGNATURE,
+        ));
+    }
+
+    /// Adds CD file system (CDFS) signatures.
+    pub fn add_cdfs_signatures(&mut self) {
+        self.signature_scanner.add_signature(Signature::new(
+            "cdfs1",
+            PatternType::BoundToStart,
+            32769,
+            CDFS_VOLUME_DESCRIPTOR_SIGNATURE,
         ));
     }
 
@@ -514,6 +525,7 @@ impl FormatScanner {
                 "apm1" | "apm2" => FormatIdentifier::Apm,
                 "bde1" | "bde2" | "bde3" | "bde4" => FormatIdentifier::Bde,
                 "bsdlabel1" => FormatIdentifier::BsdDiskLabel,
+                "cdfs1" => FormatIdentifier::CdFs,
                 "cdsaencr1" | "cdsaencr2" => FormatIdentifier::CdsaEncr,
                 "ewf1" | "ewf2" => FormatIdentifier::Ewf,
                 "exfat1" => FormatIdentifier::ExFat,
@@ -561,6 +573,7 @@ mod tests {
         format_scanner.add_apm_signatures();
         format_scanner.add_bde_signatures();
         format_scanner.add_bsdlabel_signatures();
+        format_scanner.add_cdfs_signatures();
         format_scanner.add_cdsaencr_signatures();
         format_scanner.add_ewf_signatures();
         format_scanner.add_exfat_signatures();
@@ -592,6 +605,7 @@ mod tests {
         format_scanner.add_apm_signatures();
         format_scanner.add_bde_signatures();
         format_scanner.add_bsdlabel_signatures();
+        format_scanner.add_cdfs_signatures();
         format_scanner.add_cdsaencr_signatures();
         format_scanner.add_ewf_signatures();
         format_scanner.add_ext_signatures();

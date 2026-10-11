@@ -330,8 +330,8 @@ The MFT entry header (FILE_RECORD_SEGMENT_HEADER) is 42 or 48 bytes in size and 
 | 18 | 2 | | Reference (link) count |
 | 20 | 2 | | Attributes offset (or first attribute offset), which contains an offset relative from the start of the MFT entry |
 | 22 | 2 | | [MFT entry flags](#mft_entry_flags) |
-| 24 | 4 | | Used size in bytes |
-| 28 | 4 | | MFT entry size in bytes |
+| 24 | 4 | | Used size, in bytes |
+| 28 | 4 | | MFT entry size, in bytes |
 | 32 | 8 | | [Base record file reference](#file_reference) |
 | 40 | 2 | | First available attribute identifier |
 | <td colspan="4">*If NTFS version is 3.0*</td> |
@@ -1419,9 +1419,9 @@ reparse data. The junction or mount point reparse data is of variable size and c
 | Offset | Size | Value | Description |
 | --- | --- | --- | --- |
 | 0 | 2 | | Substitute name offset, where the offset is relative from the start of the reparse name data |
-| 2 | 2 | | Substitute name size in bytes, where the size of the end-of-string character is not included |
+| 2 | 2 | | Substitute name size, in bytes, where the size of the end-of-string character is not included |
 | 4 | 2 | | Display name offset, where the offset is relative from the start of the reparse name data |
-| 6 | 2 | | Display name size in bytes, where the size of the end-of-string character is not included |
+| 6 | 2 | | Display name size, in bytes, where the size of the end-of-string character is not included |
 | <td colspan="4">*Reparse name data*</td> |
 | 8 | ... | | Substitute name, which contains an UCS-2 little-endian string without end-of-string character |
 | ... | ... | | Display name, which contains an UCS-2 little-endian string without end-of-string character |
@@ -1450,7 +1450,7 @@ The symbolic link reparse data is of variable size and consists of:
 | Offset | Size | Value | Description |
 | --- | --- | --- | --- |
 | 0 | 2 | | Substitute name offset, where the offset is relative from the start of the reparse name data |
-| 2 | 2 | | Substitute name size in bytes |
+| 2 | 2 | | Substitute name size, in bytes |
 | 4 | 2 | | Display name offset, where the offset is relative from the start of the reparse name data |
 | 6 | 2 | | Display name size, in bytes |
 | 8 | 4 | | Symbolic link flags |
@@ -1506,7 +1506,7 @@ of:
 | 0 | 4 | 1 | Version |
 | 4 | 4 | 0 | Unknown (reserved) |
 | 8 | 16 | | Look-up identifier, which contains a GUID |
-| 24 | 2 | | Name size in bytes |
+| 24 | 2 | | Name size, in bytes |
 | 26 | ... | | Name, which contains an UCS-2 little-endian string without end-of-string character |
 
 ## The cluster block allocation bitmap {#cluster_block_allocation_bitmap}
@@ -1658,8 +1658,8 @@ The USN change journal metadata is 32 bytes in size and consists of:
 
 | Offset | Size | Value | Description |
 | --- | --- | --- | --- |
-| 0 | 8 | | Maximum size in bytes |
-| 8 | 8 | | Allocation (size) delta in bytes |
+| 0 | 8 | | Maximum size, in bytes |
+| 8 | 8 | | Allocation (size) delta, in bytes |
 | 16 | 8 | | Update (USN) journal identifier, which contains a FILETIME |
 | 24 | 8 | | Unknown (empty) |
 
@@ -1691,7 +1691,7 @@ The USN change journal entry (USN_RECORD_V2) is of variable size and consists of
 | 44 | 4 | | [Update source flags](#update_source_flags) |
 | 48 | 4 | | Security descriptor identifier, which contains the entry number in the security ID index ($Secure:$SII). Also see [Access Control](#access_control) |
 | 52 | 4 | | [File attribute flags](#file_attribute_flags) |
-| 56 | 2 | | Name size in bytes |
+| 56 | 2 | | Name size, in bytes |
 | 58 | 2 | | Name offset, which is relative from the start of the USN change journal entry |
 | 60 | (name size) | | Name, which contains an UCS-2 little-endian string without end-of-string character |
 | ... | ... | 0x00 | Unknown (Padding) |

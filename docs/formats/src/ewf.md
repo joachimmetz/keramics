@@ -1078,9 +1078,9 @@ The raw sector size of a MODE-1 CD-ROM is 2352 bytes in size and consists of:
 | --- | --- | --- | --- |
 | 0 | 16 | | Synchronization bytes |
 | 16 | 2048 | | Data |
-| 2054 | 4 | | Error detection |
-| 2058 | 8 | 0x00 | Unknown (Empty values) |
-| 2066 | 276 | | Error correction |
+| 2064 | 4 | | Error detection |
+| 2068 | 8 | 0x00 | Unknown (Empty values) |
+| 2076 | 276 | | Error correction |
 
 TODO: add information about Mode-2 and Mode-XA
 
@@ -1815,7 +1815,7 @@ The 1st line of the file entry consists of the following 2 values:
 | 13 | dl | Deletion date and time |
 | 14 | aq | Acquisition date and time, which contains an integer with a POSIX timestamp |
 | 15 | ha | MD5 hash, which contains a string with the MD5 hash of the file data |
-| 16 | ls | File size in bytes. If the file size is 0 the data size should be 1 |
+| 16 | ls | File size, in bytes. If the file size is 0 the data size should be 1 |
 | 17 | du | Duplicate data offset, relative from the start of the media data |
 | 18 | lo | Logical offset, which contains an integer which is -1 when value is not set |
 | 19 | po | Physical offset, which contains an integer which is -1 when value is not set (or does this value contain the segment file in which the start of the data is stored, -1 for a single segment file?) |

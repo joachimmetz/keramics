@@ -11,6 +11,7 @@ Supported data formats:
 * [Apple Partition Map (APM)](https://keramics.github.io/apm.html)
 * [BitLocker Drive Encryption (BDE)](https://github.com/keramics/keramics/tree/main/keramics-formats/src/bde/README.md)
 * [BSD disklabel (bsdlabel)](https:////keramics.github.io/bsdlabel.html)
+* [CD file system (CDFS)](https://github.com/keramics/keramics/tree/main/keramics-formats/src/cdfs/README.md)
 * [Expert Witness Compression Format (EWF)](https://github.com/keramics/keramics/tree/main/keramics-formats/src/ewf/README.md)
 * [Extended File System (ext)](https://github.com/keramics/keramics/tree/main/keramics-formats/src/ext/README.md)
 * [File Allocation Table (FAT) file system](https://keramics.github.io/fat.html)
