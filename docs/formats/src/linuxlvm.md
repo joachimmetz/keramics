@@ -65,7 +65,7 @@ The physical volume label header (struct label_header) is 32 bytes in size and c
 | 0 | 8 | "LABELONE" | Signature (or identifier) |
 | 8 | 8 | | Sector number, which contains the sector number of the physical volume label header |
 | 16 | 4 | | Checksum, which contains a CRC-32 for offset 20 to end of the physical volume label sector |
-| 20 | 4 | | Data offset (or header size), which contains an offset in bytes relative from the start of the physical volume label header |
+| 20 | 4 | | Data offset (or header size), which is relative from the start of the physical volume label header |
 | 24 | 8 | "LVM2\x20001" | Type indicator |
 
 ### Physical volume header
@@ -90,7 +90,7 @@ formatted variant "9LBcEB-7PQT-GIlL-I0Kx-rtzr-ynju-SL983W", which is used in the
 
 | Offset | Size | Value | Description |
 | --- | --- | --- | --- |
-| 0 | 8 | | Data area offset, which contains an offset in bytes relative to the start of the physical volume |
+| 0 | 8 | | Data area offset, which is relative to the start of the physical volume |
 | 8 | 8 | | Data area size, in number of bytes |
 
 ## The metadata area
@@ -113,7 +113,7 @@ The metadata area header (struct mda_header) is 512 bytes in size and consist of
 | 0 | 4 | | Checksum, which contains the CRC-32 for offset 4 to end of the metadata area header |
 | 4 | 16 | "\x20LVM2\x20x[5A%r0N\*>" | Signature |
 | 20 | 4 | 1 | Format version |
-| 24 | 8 | | Metadata area offset, which contains an offset in bytes relative to the start of the physical volume |
+| 24 | 8 | | Metadata area offset, which is relative to the start of the physical volume |
 | 32 | 8 | | Metadata area size, in number of bytes |
 | 40 | 4 x 24 = 96 | | List of [raw location descriptors](#raw_location_descriptor), where the last descriptor in the list is a terminator and consists of 0-byte values |
 | 136 | 376 | 0 | Unknown (unused) |
@@ -124,7 +124,7 @@ The raw location descriptor (struct raw_locn) is 24 bytes in size and consist of
 
 | Offset | Size | Value | Description |
 | --- | --- | --- | --- |
-| 0 | 8 | | Data area offset, which contains an offset in bytes relative to the start of the metadata area |
+| 0 | 8 | | Data area offset, which is relative to the start of the metadata area |
 | 8 | 8 | | Data area size, in number of bytes |
 | 16 | 4 | | Checksum, which contains the CRC-32 of the data area described by the raw location descriptor |
 | 20 | 4 | | [Flags](#raw_location_descriptor_flags) |
@@ -310,7 +310,7 @@ Each physical volume object contains the following properties:
 | "flags" | [Flags](#flags) |
 | "id" | Physical volume identifier (PV UUID), which contains an ASCII string in the following format: 9LBcEB-7PQT-GIlL-I0Kx-rtzr-ynju-SL983W |
 | "pe_count" | The number of (allocated) extents in the physical volume |
-| "pe_start" | The start extent, which contains an offset in bytes relative from the start of the physical volume |
+| "pe_start" | The start extent, which is relative from the start of the physical volume |
 | "status" | The [status flags](#status_flags), which contains a list of strings |
 
 ### Logical volumes object {#metadata_logical_volumes_object}

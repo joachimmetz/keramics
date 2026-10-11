@@ -33,6 +33,7 @@ pub enum DataType {
     BitField64,
     BitField128,
     ByteString,
+    CdFsDateTime,
     FatDate,
     FatTimeDate,
     FatTimeDate10Ms,

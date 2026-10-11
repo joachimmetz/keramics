@@ -156,7 +156,7 @@ A directory entry is 32 bytes in size and consists of:
 | --- | --- | --- | --- |
 | 0 | 1 | | Entry type |
 | 1 | 1 | | [Entry flags](#directory_entry_flags) |
-| 1 | 19 | | Entry data |
+| 2 | 18 | | Entry data |
 | 20 | 4 | | Data start cluster |
 | 24 | 8 | | Data size |
 

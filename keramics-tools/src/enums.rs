@@ -218,6 +218,9 @@ pub enum FormatType {
     #[value(name = "bsdlabel")]
     BsdDiskLabel,
 
+    /// CD file system (CDFS)
+    CdFs,
+
     /// Mac OS Encrypted Encoding (cdsaencr)
     #[value(name = "cdsaencr")]
     CdsaEncr,

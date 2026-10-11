@@ -64,7 +64,10 @@ impl BdeEowRelocationLog {
             Err(mut error) => {
                 keramics_core::error_trace_add_frame!(
                     error,
-                    "Unable to read Encrypt-on-Write (EOW) relocation log header",
+                    format!(
+                        "Unable to read Encrypt-on-Write (EOW) relocation log header at offset: {} (0x{:08x})",
+                        offset, offset
+                    )
                 );
                 return Err(error);
             }

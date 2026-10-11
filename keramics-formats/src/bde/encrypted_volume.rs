@@ -969,13 +969,11 @@ impl BdeEncryptedVolume {
                             return Err(error);
                         }
                     };
-                    let fvek_data_size: usize = fvek_data.len();
-
                     keramics_core::debug_trace_data!(
                         "BdeFullVolumeEncryptionKey",
                         0,
                         &fvek_data,
-                        fvek_data_size
+                        fvek_data.len(),
                     );
                     if aes_ccm_encrypted_key.tag == tag {
                         let key_data_size: u32 = bytes_to_u32_le!(&fvek_data, 0);

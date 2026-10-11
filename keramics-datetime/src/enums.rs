@@ -14,6 +14,7 @@
 use std::time::SystemTime;
 
 use super::apfs::ApfsTime;
+use super::cdfs::CdFsDateTime;
 use super::fat::{FatDate, FatTimeDate, FatTimeDate10Ms};
 use super::filetime::Filetime;
 use super::hfs::HfsTime;
@@ -23,6 +24,7 @@ use super::xfs::XfsBigtime;
 #[derive(Clone, Debug, PartialEq)]
 pub enum DateTime {
     ApfsTime(ApfsTime),
+    CdFsDateTime(CdFsDateTime),
     FakeTime(SystemTime),
     FatDate(FatDate),
     FatTimeDate(FatTimeDate),

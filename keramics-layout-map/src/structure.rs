@@ -262,6 +262,7 @@ impl StructureLayoutField {
         match &self.data_type {
             DataType::ApfsTime => Some(8),
             DataType::ByteString => Some(1),
+            DataType::CdFsDateTime => Some(7),
             DataType::FatDate => Some(2),
             DataType::FatTimeDate => Some(4),
             DataType::FatTimeDate10Ms => Some(5),
@@ -448,6 +449,9 @@ impl StructureLayoutField {
                 }
                 _ => panic!("Unsupported byte order"),
             },
+            DataType::CdFsDateTime => {
+                quote!(keramics_datetime::CdFsDateTime::from_bytes(&data[#data_offset..#data_offset + 7]))
+            }
             DataType::FatDate => {
                 quote!(keramics_datetime::FatDate::from_bytes(&data[#data_offset..#data_offset + 2]))
             }
@@ -564,6 +568,7 @@ impl StructureLayoutField {
         match &self.data_type {
             DataType::ApfsTime => quote!(keramics_datetime::ApfsTime),
             DataType::ByteString => quote!(keramics_types::ByteString),
+            DataType::CdFsDateTime => quote!(keramics_datetime::CdFsDateTime),
             DataType::FatDate => quote!(keramics_datetime::FatDate),
             DataType::FatTimeDate => quote!(keramics_datetime::FatTimeDate),
             DataType::FatTimeDate10Ms => quote!(keramics_datetime::FatTimeDate10Ms),

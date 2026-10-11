@@ -12,6 +12,7 @@
  */
 
 mod apfs;
+mod cdfs;
 pub mod constants;
 mod enums;
 mod epoch;
@@ -23,6 +24,7 @@ mod util;
 mod xfs;
 
 pub use apfs::ApfsTime;
+pub use cdfs::CdFsDateTime;
 pub use enums::DateTime;
 pub use fat::{FatDate, FatTimeDate, FatTimeDate10Ms};
 pub use filetime::Filetime;

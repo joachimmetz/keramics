@@ -109,6 +109,7 @@ impl Parse for FieldDataTypeOption {
             "BitField64" => DataType::BitField64,
             "BitField128" => DataType::BitField128,
             "ByteString" => DataType::ByteString,
+            "CdFsDateTime" => DataType::CdFsDateTime,
             "FatDate" => DataType::FatDate,
             "FatTimeDate" => DataType::FatTimeDate,
             "FatTimeDate10Ms" => DataType::FatTimeDate10Ms,

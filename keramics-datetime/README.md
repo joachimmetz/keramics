@@ -9,6 +9,7 @@ Supported date and time formats:
 * 32-bit POSIX timestamp (time_t)
 * 64-bit POSIX timestamp with nanoseconds fraction (struct timespec)
 * Apple File System (APFS) timestamp
+* CD file system (CDFS) date and time
 * File Allocation Table (FAT) date and time
 * Macintosh File System (MFS) or Hierarchical File System (HFS) timestamp
 * Windows FILETIME timestamp

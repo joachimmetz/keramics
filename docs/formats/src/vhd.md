@@ -77,8 +77,8 @@ The file footer is 512 bytes in size and consists of:
 | 28 | 4 | | Creator application |
 | 32 | 4 | | Creator version, where the upper 16-bit are the major version and the lower 16-bit the minor version |
 | 36 | 4 | | Creator (host) operating system |
-| 40 | 8 | | Disk size, which contains the size of the disk in bytes |
-| 48 | 8 | | Data size, which contains the size of the data in bytes |
+| 40 | 8 | | Disk size, in bytes |
+| 48 | 8 | | Data size, in bytes |
 | 56 | 4 | | Disk geometry |
 | 60 | 4 | | Disk type |
 | 64 | 4 | | Checksum, which contains a one's complement of the sum of the file footer excluding the checksum itself |
