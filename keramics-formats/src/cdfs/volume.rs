@@ -21,7 +21,7 @@ use super::constants::*;
 use super::directory_record::CdFsDirectoryRecord;
 use super::file_system::CdFsFileSystem;
 use super::path_table::CdFsPathTable;
-use super::volume_descriptor::{CdFsVolumeDescriptor, read_trimmed_string};
+use super::volume_descriptor::CdFsVolumeDescriptor;
 
 #[derive(Clone)]
 /// CD file system (CDFS) volume.
@@ -206,14 +206,14 @@ impl CdFsVolume {
                 volume_size =
                     (volume_descriptor.volume_size as u64) * (self.bytes_per_sector as u64);
                 root_directory_record_offset = offset - self.bytes_per_sector as u64 + 156;
-                system_identifier = read_trimmed_string(&data, 8, 32);
-                volume_identifier = read_trimmed_string(&data, 40, 32);
+                system_identifier = CdFsVolumeDescriptor::read_trimmed_string(&data, 8, 32);
+                volume_identifier = CdFsVolumeDescriptor::read_trimmed_string(&data, 40, 32);
                 path_table_size = volume_descriptor.path_table_size;
                 path_table_start_sector_be = volume_descriptor.path_table_start_sector_be;
                 path_table_start_sector_le = volume_descriptor.path_table_start_sector_le;
                 volumes_in_set = volume_descriptor.volumes_in_set;
                 volume_set_index = volume_descriptor.volume_set_index;
-                volume_set_identifier = read_trimmed_string(&data, 190, 128);
+                volume_set_identifier = CdFsVolumeDescriptor::read_trimmed_string(&data, 190, 128);
                 match CdFsDirectoryRecord::read_data(&mut root_directory_record, &data[156..190]) {
                     Ok(_) => root_directory_record_read = true,
                     Err(mut error) => {

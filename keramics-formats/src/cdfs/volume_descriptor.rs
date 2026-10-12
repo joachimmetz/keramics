@@ -23,28 +23,6 @@ use super::constants::*;
 #[cfg(feature = "debug-trace")]
 use super::directory_record::CdFsDirectoryRecord;
 
-pub(super) fn read_trimmed_string(data: &[u8], offset: usize, length: usize) -> Option<ByteString> {
-    if offset + length > data.len() {
-        return None;
-    }
-    let slice: &[u8] = &data[offset..offset + length];
-    let mut trailing: usize = 0;
-    for value in slice.iter().rev() {
-        if *value == 0 || *value == b' ' {
-            trailing += 1;
-        } else {
-            break;
-        }
-    }
-    let trimmed: &[u8] = &slice[..slice.len() - trailing];
-    if trimmed.is_empty() {
-        return None;
-    }
-    let mut byte_string: ByteString = ByteString::new_with_encoding(&CharacterEncoding::Ascii);
-    byte_string.elements.extend_from_slice(trimmed);
-    Some(byte_string)
-}
-
 #[derive(LayoutMap)]
 #[layout_map(
     structure(
@@ -145,6 +123,33 @@ impl CdFsVolumeDescriptor {
             path_table_start_sector_le: 0,
             path_table_start_sector_be: 0,
         }
+    }
+
+    /// Reads a trimmed string from a buffer.
+    pub(super) fn read_trimmed_string(
+        data: &[u8],
+        offset: usize,
+        length: usize,
+    ) -> Option<ByteString> {
+        if offset + length > data.len() {
+            return None;
+        }
+        let slice: &[u8] = &data[offset..offset + length];
+        let mut trailing: usize = 0;
+        for value in slice.iter().rev() {
+            if *value == 0 || *value == b' ' {
+                trailing += 1;
+            } else {
+                break;
+            }
+        }
+        let trimmed: &[u8] = &slice[..slice.len() - trailing];
+        if trimmed.is_empty() {
+            return None;
+        }
+        let mut byte_string: ByteString = ByteString::new_with_encoding(&CharacterEncoding::Ascii);
+        byte_string.elements.extend_from_slice(trimmed);
+        Some(byte_string)
     }
 
     /// Reads the volume descriptor from a buffer.
