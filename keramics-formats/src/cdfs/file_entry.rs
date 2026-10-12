@@ -25,6 +25,7 @@ use crate::traits::FileEntryIterator;
 use super::constants::*;
 use super::directory_record::CdFsDirectoryRecord;
 use super::extended_attribute_record::CdFsExtendedAttributeRecord;
+use super::file_name::CdFsFileName;
 
 /// CD file system (CDFS) file entry.
 pub struct CdFsFileEntry {
@@ -163,33 +164,6 @@ impl CdFsFileEntry {
         self.directory_record.name.is_empty()
     }
 
-    /// Determines if a sub file entry name matches the entry name.
-    fn sub_file_entry_name_matches(
-        sub_file_entry_name: &PathComponent,
-        entry_name: &ByteString,
-    ) -> bool {
-        match sub_file_entry_name {
-            PathComponent::Root | PathComponent::Parent | PathComponent::Current => false,
-            _ => {
-                let sub_file_entry_name_string: String =
-                    sub_file_entry_name.to_string().to_ascii_lowercase();
-                let entry_name_string: String = entry_name.to_string().to_ascii_lowercase();
-
-                // CDFS entry names consist of a base name, an extension part and
-                // a version number, e.g. EMPTYFILE.;1 or EMPTYFILE.TXT;1.
-                let entry_name_stem: &str = entry_name_string
-                    .split(';')
-                    .next()
-                    .unwrap_or(entry_name_string.as_str());
-                let entry_name_stem: &str =
-                    entry_name_stem.strip_suffix('.').unwrap_or(entry_name_stem);
-
-                sub_file_entry_name_string == entry_name_stem
-                    || sub_file_entry_name_string == entry_name_string
-            }
-        }
-    }
-
     /// Retrieves a specific sub file entry by name.
     pub fn get_sub_file_entry_by_name(
         &mut self,
@@ -211,7 +185,7 @@ impl CdFsFileEntry {
             .sub_directory_records
             .iter_mut()
             .find(|(_, directory_record)| {
-                Self::sub_file_entry_name_matches(sub_file_entry_name, &directory_record.name)
+                CdFsFileName::new(directory_record.name.clone()).compare(sub_file_entry_name)
             }) {
             Some((name, directory_record)) => {
                 let sub_file_entry_offset: u64 = match self.sub_directory_record_offsets.get(name) {
@@ -227,37 +201,6 @@ impl CdFsFileEntry {
             }
             None => Ok(None),
         }
-    }
-
-    /// Loads the extended attribute record from the file's first extent,
-    /// caching it on first access.
-    ///
-    /// Returns `true` if the file entry has an associated extended attribute
-    /// record, after which the record values can be retrieved with e.g.
-    /// [`get_owner_identifier`](Self::get_owner_identifier) and
-    /// [`get_permissions`](Self::get_permissions).
-    pub fn get_extended_attribute_record(&mut self) -> Result<bool, ErrorTrace> {
-        if self.extended_attribute_record.is_some() {
-            return Ok(true);
-        }
-        if self.extended_attribute_record_read {
-            return Ok(false);
-        }
-        if self.directory_record.data_size == 0 {
-            self.extended_attribute_record_read = true;
-            return Ok(false);
-        }
-        let extended_attribute_record: CdFsExtendedAttributeRecord =
-            match self.read_extended_attribute_record() {
-                Ok(extended_attribute_record) => extended_attribute_record,
-                Err(error) => {
-                    self.extended_attribute_record_read = true;
-                    return Err(error);
-                }
-            };
-        self.extended_attribute_record = Some(extended_attribute_record);
-        self.extended_attribute_record_read = true;
-        Ok(true)
     }
 
     /// Reads the extended attribute record from the file's first extent.
@@ -472,6 +415,38 @@ mod tests {
     }
 
     #[test]
+    fn test_get_creation_time() -> Result<(), ErrorTrace> {
+        let file_entry: CdFsFileEntry = get_file_entry()?;
+        assert!(file_entry.get_creation_time().is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_effective_time() -> Result<(), ErrorTrace> {
+        let file_entry: CdFsFileEntry = get_file_entry()?;
+        assert!(file_entry.get_effective_time().is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_expiration_time() -> Result<(), ErrorTrace> {
+        let file_entry: CdFsFileEntry = get_file_entry()?;
+        assert!(file_entry.get_expiration_time().is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_group_identifier() -> Result<(), ErrorTrace> {
+        let file_entry: CdFsFileEntry = get_file_entry()?;
+        assert!(file_entry.get_group_identifier().is_none());
+
+        Ok(())
+    }
+
+    #[test]
     fn test_get_identifier() -> Result<(), ErrorTrace> {
         let mut file_entry: CdFsFileEntry = get_file_entry()?;
 
@@ -485,16 +460,46 @@ mod tests {
     }
 
     #[test]
+    fn test_get_modification_time() -> Result<(), ErrorTrace> {
+        let file_entry: CdFsFileEntry = get_file_entry()?;
+        assert!(file_entry.get_modification_time().is_none());
+
+        Ok(())
+    }
+
+    #[test]
     fn test_get_name() -> Result<(), ErrorTrace> {
         let mut file_entry: CdFsFileEntry = get_file_entry()?;
 
         let name: Option<&ByteString> = file_entry.get_name();
-        assert!(name.is_none());
+        assert_eq!(name, None);
 
         let sub_file_entry: CdFsFileEntry = file_entry.get_sub_file_entry_by_index(0)?;
 
         let name: Option<&ByteString> = sub_file_entry.get_name();
-        assert!(name.is_some());
+        assert_eq!(
+            name,
+            Some(ByteString {
+                encoding: CharacterEncoding::Ascii,
+                elements: b"EMPTYFILE.;1".to_vec(),
+            })
+            .as_ref(),
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_owner_identifier() -> Result<(), ErrorTrace> {
+        let file_entry: CdFsFileEntry = get_file_entry()?;
+        assert!(file_entry.get_owner_identifier().is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_permissions() -> Result<(), ErrorTrace> {
+        let file_entry: CdFsFileEntry = get_file_entry()?;
+        assert!(file_entry.get_permissions().is_none());
 
         Ok(())
     }
@@ -561,6 +566,58 @@ mod tests {
         );
         let result: Result<CdFsFileEntry, ErrorTrace> = file_entry.get_sub_file_entry_by_index(8);
         assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_size() -> Result<(), ErrorTrace> {
+        let mut file_entry: CdFsFileEntry = get_file_entry()?;
+
+        let sub_file_entry: CdFsFileEntry = file_entry.get_sub_file_entry_by_index(0)?;
+        assert_eq!(sub_file_entry.get_size(), 0);
+
+        let mut sub_file_entry: CdFsFileEntry = file_entry.get_sub_file_entry_by_index(7)?;
+        let name_component: PathComponent = PathComponent::from("TESTFILE1");
+        let sub_file_entry: CdFsFileEntry = sub_file_entry
+            .get_sub_file_entry_by_name(&name_component)?
+            .ok_or_else(|| keramics_core::error_trace_new!("Missing sub file entry"))?;
+        assert_eq!(sub_file_entry.get_size(), 9);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_sub_file_entry_by_name() -> Result<(), ErrorTrace> {
+        let mut file_entry: CdFsFileEntry = get_file_entry()?;
+
+        let name_component: PathComponent = PathComponent::from("EMPTYFILE");
+        let sub_file_entry: CdFsFileEntry = file_entry
+            .get_sub_file_entry_by_name(&name_component)?
+            .ok_or_else(|| keramics_core::error_trace_new!("Missing sub file entry"))?;
+        let name: Option<&ByteString> = sub_file_entry.get_name();
+        assert_eq!(
+            name,
+            Some(ByteString {
+                encoding: CharacterEncoding::Ascii,
+                elements: b"EMPTYFILE.;1".to_vec(),
+            })
+            .as_ref(),
+        );
+
+        let name_component: PathComponent = PathComponent::from("TESTDIR1");
+        let sub_file_entry: CdFsFileEntry = file_entry
+            .get_sub_file_entry_by_name(&name_component)?
+            .ok_or_else(|| keramics_core::error_trace_new!("Missing sub file entry"))?;
+        assert!(sub_file_entry.is_directory());
+
+        let result: Option<CdFsFileEntry> =
+            file_entry.get_sub_file_entry_by_name(&PathComponent::from("NONEXISTENT"))?;
+        assert!(result.is_none());
+
+        let result: Option<CdFsFileEntry> =
+            file_entry.get_sub_file_entry_by_name(&PathComponent::Root)?;
+        assert!(result.is_none());
 
         Ok(())
     }

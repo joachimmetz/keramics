@@ -15,6 +15,7 @@ pub mod constants;
 mod directory_record;
 mod extended_attribute_record;
 mod file_entry;
+mod file_name;
 mod file_system;
 mod path_table;
 mod path_table_record;
