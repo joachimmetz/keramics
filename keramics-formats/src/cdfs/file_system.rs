@@ -89,8 +89,8 @@ impl CdFsFileSystem {
                 Ok(CdFsFileEntry::new(
                     data_stream,
                     bytes_per_sector,
-                    directory_record,
                     directory_record_offset,
+                    directory_record,
                 ))
             }
             None => Err(keramics_core::error_trace_new!("Missing volumes")),

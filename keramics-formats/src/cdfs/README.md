@@ -13,5 +13,6 @@ Unsupported features:
 
 | Category | Feature(s) |
 | --- | --- |
+| Format versions | High Sierra, ISO 9660 level 4 (or version 2) |
 | Extensions | Apple Hybrid CD, Joliet, Rock Ridge, El Torito, UDF |
 | | Cross-Volume File Referencing |
