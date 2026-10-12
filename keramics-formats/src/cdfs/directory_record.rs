@@ -14,7 +14,9 @@
 use keramics_core::ErrorTrace;
 use keramics_encodings::CharacterEncoding;
 use keramics_layout_map::LayoutMap;
-use keramics_types::{ByteString, bytes_to_u32_be, bytes_to_u32_le};
+use keramics_types::{
+    ByteString, bytes_to_u16_be, bytes_to_u16_le, bytes_to_u32_be, bytes_to_u32_le,
+};
 
 #[derive(Clone, LayoutMap)]
 #[layout_map(
@@ -58,6 +60,9 @@ pub struct CdFsDirectoryRecord {
     /// File flags.
     pub file_flags: u8,
 
+    /// Volume set index.
+    pub volume_set_index: u16,
+
     /// Name.
     pub name: ByteString,
 }
@@ -71,6 +76,7 @@ impl CdFsDirectoryRecord {
             data_start_sector: 0,
             data_size: 0,
             file_flags: 0,
+            volume_set_index: 0,
             name: ByteString::new_with_encoding(&CharacterEncoding::Ascii),
         }
     }
@@ -102,8 +108,14 @@ impl CdFsDirectoryRecord {
         }
         self.file_flags = data[25];
 
-        // TODO: check volume set index
+        self.volume_set_index = bytes_to_u16_be!(data, 30);
 
+        let volume_set_index: u16 = bytes_to_u16_le!(data, 28);
+        if self.volume_set_index != volume_set_index {
+            return Err(keramics_core::error_trace_new!(
+                "Mismatch between big- and little-endian volume set index"
+            ));
+        }
         let data_end_offset: usize = 33 + (data[32] as usize);
 
         if data_end_offset > data_size {
@@ -131,9 +143,9 @@ mod tests {
 
     #[test]
     fn test_read_data() -> Result<(), ErrorTrace> {
-        let test_data: Vec<u8> = get_test_data();
-
         let mut test_struct = CdFsDirectoryRecord::new();
+
+        let test_data: Vec<u8> = get_test_data();
         test_struct.read_data(&test_data)?;
 
         assert_eq!(test_struct.record_size, 41);
@@ -141,6 +153,7 @@ mod tests {
         assert_eq!(test_struct.data_start_sector, 24);
         assert_eq!(test_struct.data_size, 2048);
         assert_eq!(test_struct.file_flags, 0x02);
+        assert_eq!(test_struct.volume_set_index, 1);
         assert_eq!(
             test_struct.name,
             ByteString {
@@ -157,6 +170,39 @@ mod tests {
 
         let test_data: Vec<u8> = get_test_data();
         let result = test_struct.read_data(&test_data[0..32]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_with_data_start_sector_mismatch() {
+        let mut test_struct = CdFsDirectoryRecord::new();
+
+        let mut test_data: Vec<u8> = get_test_data();
+        test_data[2] = 0xff;
+
+        let result = test_struct.read_data(&test_data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_with_data_size_mismatch() {
+        let mut test_struct = CdFsDirectoryRecord::new();
+
+        let mut test_data: Vec<u8> = get_test_data();
+        test_data[10] = 0xff;
+
+        let result = test_struct.read_data(&test_data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_with_volume_set_index_mismatch() {
+        let mut test_struct = CdFsDirectoryRecord::new();
+
+        let mut test_data: Vec<u8> = get_test_data();
+        test_data[28] = 0xff;
+
+        let result = test_struct.read_data(&test_data);
         assert!(result.is_err());
     }
 }

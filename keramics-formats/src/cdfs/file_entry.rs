@@ -35,11 +35,11 @@ pub struct CdFsFileEntry {
     /// Bytes per sector.
     bytes_per_sector: u16,
 
-    /// The directory record.
-    directory_record: CdFsDirectoryRecord,
-
     /// The offset of the directory record.
     directory_record_offset: u64,
+
+    /// The directory record.
+    directory_record: CdFsDirectoryRecord,
 
     /// The extended attribute record.
     extended_attribute_record: Option<CdFsExtendedAttributeRecord>,
@@ -62,14 +62,14 @@ impl CdFsFileEntry {
     pub(super) fn new(
         data_stream: &DataStreamReference,
         bytes_per_sector: u16,
-        directory_record: CdFsDirectoryRecord,
         directory_record_offset: u64,
+        directory_record: CdFsDirectoryRecord,
     ) -> Self {
         Self {
             data_stream: data_stream.clone(),
             bytes_per_sector,
-            directory_record,
             directory_record_offset,
+            directory_record,
             extended_attribute_record: None,
             extended_attribute_record_read: false,
             sub_directory_records: IndexedHashMap::new(),
@@ -153,17 +153,6 @@ impl CdFsFileEntry {
         self.directory_record.data_size as u64
     }
 
-    /// Determines if the file entry is a directory.
-    pub fn is_directory(&self) -> bool {
-        self.directory_record.file_flags & CDFS_DIRECTORY_FILE_FLAG_DIRECTORY
-            == CDFS_DIRECTORY_FILE_FLAG_DIRECTORY
-    }
-
-    /// Determines if the file entry is the root directory.
-    pub fn is_root_directory(&self) -> bool {
-        self.directory_record.name.is_empty()
-    }
-
     /// Retrieves a specific sub file entry by name.
     pub fn get_sub_file_entry_by_name(
         &mut self,
@@ -195,28 +184,38 @@ impl CdFsFileEntry {
                 Ok(Some(Self::new(
                     &self.data_stream,
                     self.bytes_per_sector,
-                    directory_record.clone(),
                     sub_file_entry_offset,
+                    directory_record.clone(),
                 )))
             }
             None => Ok(None),
         }
     }
 
-    /// Reads the extended attribute record from the file's first extent.
+    /// Determines if the file entry is a directory.
+    pub fn is_directory(&self) -> bool {
+        self.directory_record.file_flags & CDFS_FILE_FLAG_DIRECTORY != 0
+    }
+
+    /// Determines if the file entry is the root directory.
+    pub fn is_root_directory(&self) -> bool {
+        self.directory_record.name.is_empty()
+    }
+
+    /// Reads the extended attribute record.
     fn read_extended_attribute_record(
         &mut self,
     ) -> Result<CdFsExtendedAttributeRecord, ErrorTrace> {
         if self.directory_record.data_size == 0 {
             return Err(keramics_core::error_trace_new!(
-                "Missing directory record data size"
+                "Unsupported directory record data size"
             ));
         }
         let data_start_offset: u64 =
             (self.directory_record.data_start_sector as u64) * (self.bytes_per_sector as u64);
-        let data_size: usize = ((self.directory_record.extended_attribute_record_size as usize)
-            * (self.bytes_per_sector as usize))
-            .max(78);
+        let data_size: usize = self.directory_record.extended_attribute_record_size as usize;
+
+        // TODO: read in blocks of self.bytes_per_sector
         let mut data: Vec<u8> = vec![0; data_size];
 
         keramics_core::data_stream_read_exact_at_position!(
@@ -363,8 +362,8 @@ impl FileEntryIterator for CdFsFileEntry {
                 Ok(Self::new(
                     &self.data_stream,
                     self.bytes_per_sector,
-                    directory_record.clone(),
                     sub_file_entry_offset,
+                    directory_record.clone(),
                 ))
             }
             None => Err(keramics_core::error_trace_new!(format!(
@@ -409,8 +408,8 @@ mod tests {
         Ok(CdFsFileEntry::new(
             data_stream,
             bytes_per_sector,
-            directory_record,
             directory_record_offset,
+            directory_record,
         ))
     }
 
@@ -505,27 +504,18 @@ mod tests {
     }
 
     #[test]
-    fn test_is_directory() -> Result<(), ErrorTrace> {
+    fn test_get_size() -> Result<(), ErrorTrace> {
         let mut file_entry: CdFsFileEntry = get_file_entry()?;
 
-        assert!(file_entry.is_directory());
-
         let sub_file_entry: CdFsFileEntry = file_entry.get_sub_file_entry_by_index(0)?;
+        assert_eq!(sub_file_entry.get_size(), 0);
 
-        assert!(!sub_file_entry.is_directory());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_is_root_directory() -> Result<(), ErrorTrace> {
-        let mut file_entry: CdFsFileEntry = get_file_entry()?;
-
-        assert!(file_entry.is_root_directory());
-
-        let sub_file_entry: CdFsFileEntry = file_entry.get_sub_file_entry_by_index(0)?;
-
-        assert!(!sub_file_entry.is_root_directory());
+        let mut sub_file_entry: CdFsFileEntry = file_entry.get_sub_file_entry_by_index(7)?;
+        let name_component: PathComponent = PathComponent::from("TESTFILE1");
+        let sub_file_entry: CdFsFileEntry = sub_file_entry
+            .get_sub_file_entry_by_name(&name_component)?
+            .ok_or_else(|| keramics_core::error_trace_new!("Missing sub file entry"))?;
+        assert_eq!(sub_file_entry.get_size(), 9);
 
         Ok(())
     }
@@ -571,23 +561,6 @@ mod tests {
     }
 
     #[test]
-    fn test_get_size() -> Result<(), ErrorTrace> {
-        let mut file_entry: CdFsFileEntry = get_file_entry()?;
-
-        let sub_file_entry: CdFsFileEntry = file_entry.get_sub_file_entry_by_index(0)?;
-        assert_eq!(sub_file_entry.get_size(), 0);
-
-        let mut sub_file_entry: CdFsFileEntry = file_entry.get_sub_file_entry_by_index(7)?;
-        let name_component: PathComponent = PathComponent::from("TESTFILE1");
-        let sub_file_entry: CdFsFileEntry = sub_file_entry
-            .get_sub_file_entry_by_name(&name_component)?
-            .ok_or_else(|| keramics_core::error_trace_new!("Missing sub file entry"))?;
-        assert_eq!(sub_file_entry.get_size(), 9);
-
-        Ok(())
-    }
-
-    #[test]
     fn test_get_sub_file_entry_by_name() -> Result<(), ErrorTrace> {
         let mut file_entry: CdFsFileEntry = get_file_entry()?;
 
@@ -618,6 +591,32 @@ mod tests {
         let result: Option<CdFsFileEntry> =
             file_entry.get_sub_file_entry_by_name(&PathComponent::Root)?;
         assert!(result.is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_is_directory() -> Result<(), ErrorTrace> {
+        let mut file_entry: CdFsFileEntry = get_file_entry()?;
+
+        assert!(file_entry.is_directory());
+
+        let sub_file_entry: CdFsFileEntry = file_entry.get_sub_file_entry_by_index(0)?;
+
+        assert!(!sub_file_entry.is_directory());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_is_root_directory() -> Result<(), ErrorTrace> {
+        let mut file_entry: CdFsFileEntry = get_file_entry()?;
+
+        assert!(file_entry.is_root_directory());
+
+        let sub_file_entry: CdFsFileEntry = file_entry.get_sub_file_entry_by_index(0)?;
+
+        assert!(!sub_file_entry.is_root_directory());
 
         Ok(())
     }

@@ -129,53 +129,110 @@ impl CdFsExtendedAttributeRecord {
 mod tests {
     use super::*;
 
-    static TEST_DATA: [u8; 78] = [
-        0x0a, 0x00, 0x00, 0x0a, 0x14, 0x00, 0x00, 0x14, 0x01, 0xff, 0x32, 0x30, 0x31, 0x30, 0x30,
-        0x38, 0x31, 0x32, 0x32, 0x30, 0x30, 0x36, 0x33, 0x31, 0x30, 0x30, 0x38, 0x32, 0x30, 0x31,
-        0x30, 0x30, 0x38, 0x31, 0x32, 0x32, 0x30, 0x30, 0x36, 0x33, 0x31, 0x30, 0x30, 0x38, 0x32,
-        0x30, 0x31, 0x30, 0x30, 0x38, 0x31, 0x32, 0x32, 0x30, 0x30, 0x36, 0x33, 0x31, 0x30, 0x30,
-        0x38, 0x32, 0x30, 0x31, 0x30, 0x30, 0x38, 0x31, 0x32, 0x32, 0x30, 0x30, 0x36, 0x33, 0x31,
-        0x30, 0x30, 0x38,
-    ];
+    fn get_test_data() -> Vec<u8> {
+        vec![
+            0x0a, 0x00, 0x00, 0x0a, 0x14, 0x00, 0x00, 0x14, 0x01, 0xff, 0x32, 0x30, 0x31, 0x30,
+            0x30, 0x38, 0x31, 0x32, 0x32, 0x30, 0x30, 0x36, 0x33, 0x31, 0x30, 0x30, 0x38, 0x32,
+            0x30, 0x31, 0x30, 0x30, 0x38, 0x31, 0x32, 0x32, 0x30, 0x30, 0x36, 0x33, 0x31, 0x30,
+            0x30, 0x38, 0x32, 0x30, 0x31, 0x30, 0x30, 0x38, 0x31, 0x32, 0x32, 0x30, 0x30, 0x36,
+            0x33, 0x31, 0x30, 0x30, 0x38, 0x32, 0x30, 0x31, 0x30, 0x30, 0x38, 0x31, 0x32, 0x32,
+            0x30, 0x30, 0x36, 0x33, 0x31, 0x30, 0x30, 0x38,
+        ]
+    }
 
     #[test]
     fn test_read_data() -> Result<(), ErrorTrace> {
-        let test_data: &[u8] = &TEST_DATA;
-
         let mut test_struct = CdFsExtendedAttributeRecord::new();
+
+        let test_data: Vec<u8> = get_test_data();
         test_struct.read_data(&test_data)?;
 
         assert_eq!(test_struct.owner_identifier, 10);
         assert_eq!(test_struct.group_identifier, 20);
         assert_eq!(test_struct.permissions, 0x01ff);
-        assert_eq!(test_struct.creation_time.year, 2010);
-        assert_eq!(test_struct.creation_time.month, 8);
-        assert_eq!(test_struct.creation_time.day_of_month, 12);
-        assert_eq!(test_struct.creation_time.hours, 20);
-        assert_eq!(test_struct.creation_time.minutes, 6);
-        assert_eq!(test_struct.creation_time.seconds, 31);
-        assert_eq!(test_struct.creation_time.utc_offset, 8);
-        assert!(test_struct.modification_time.is_set());
-        assert!(test_struct.expiration_time.is_set());
-        assert!(test_struct.effective_time.is_set());
-
+        assert_eq!(
+            test_struct.creation_time,
+            CdFsDateTime {
+                year: 2010,
+                month: 8,
+                day_of_month: 12,
+                hours: 20,
+                minutes: 6,
+                seconds: 31,
+                fraction: Some(0),
+                utc_offset: 8,
+            }
+        );
+        assert_eq!(
+            test_struct.modification_time,
+            CdFsDateTime {
+                year: 2010,
+                month: 8,
+                day_of_month: 12,
+                hours: 20,
+                minutes: 6,
+                seconds: 31,
+                fraction: Some(0),
+                utc_offset: 8,
+            }
+        );
+        assert_eq!(
+            test_struct.expiration_time,
+            CdFsDateTime {
+                year: 2010,
+                month: 8,
+                day_of_month: 12,
+                hours: 20,
+                minutes: 6,
+                seconds: 31,
+                fraction: Some(0),
+                utc_offset: 8,
+            }
+        );
+        assert_eq!(
+            test_struct.effective_time,
+            CdFsDateTime {
+                year: 2010,
+                month: 8,
+                day_of_month: 12,
+                hours: 20,
+                minutes: 6,
+                seconds: 31,
+                fraction: Some(0),
+                utc_offset: 8,
+            }
+        );
         Ok(())
     }
 
     #[test]
     fn test_read_data_with_unsupported_data_size() {
         let mut test_struct = CdFsExtendedAttributeRecord::new();
-        let result = test_struct.read_data(&TEST_DATA[0..77]);
+
+        let test_data: Vec<u8> = get_test_data();
+        let result = test_struct.read_data(&test_data[0..77]);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_read_data_with_owner_identifier_mismatch() {
-        let mut mismatched_data: [u8; 78] = TEST_DATA;
-        mismatched_data[3] = 0x0b;
-
         let mut test_struct = CdFsExtendedAttributeRecord::new();
-        let result = test_struct.read_data(&mismatched_data);
+
+        let mut test_data: Vec<u8> = get_test_data();
+        test_data[0] = 0xff;
+
+        let result = test_struct.read_data(&test_data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_with_group_identifier_mismatch() {
+        let mut test_struct = CdFsExtendedAttributeRecord::new();
+
+        let mut test_data: Vec<u8> = get_test_data();
+        test_data[4] = 0xff;
+
+        let result = test_struct.read_data(&test_data);
         assert!(result.is_err());
     }
 }

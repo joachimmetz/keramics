@@ -415,13 +415,18 @@ The directory record is of variable size and consists of:
 
 ### Extended attribute record
 
+> Note that extended attribute here does not refer to xattr type of extended attributes but an
+> extension of the file (system) entry attributes.
+
+The extended attribute record (XAR) is of variable size and consists of:
+
 | Offset | Size | Value | Description |
 | --- | --- | --- | --- |
 | 0 | 2 | | Owner identifier, in little-endian |
 | 2 | 2 | | Owner identifier, in big-endian |
 | 4 | 2 | | Group identifier, in little-endian |
 | 6 | 2 | | Group identifier, in big-endian |
-| 8 | 2 | | Permissions |
+| 8 | 2 | | [Permissions](#permissions) |
 | 10 | 17 | | Creation [time](#date_time_string) |
 | 27 | 17 | | (Last) modification [time](#date_time_string) |
 | 44 | 17 | | Expiration [time](#date_time_string) |

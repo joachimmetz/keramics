@@ -37,14 +37,11 @@ pub struct CdFsDateTime {
     pub seconds: u8,
 
     /// Fraction in 100th of a second.
-    pub fraction: u8,
+    pub fraction: Option<u8>,
 
     /// UTC offset in number of 15 minute intervals, where negative values
     /// represent West of UTC.
     pub utc_offset: i8,
-
-    /// Determines if the fraction was set by from_string.
-    fraction_set: bool,
 }
 
 impl CdFsDateTime {
@@ -57,9 +54,8 @@ impl CdFsDateTime {
             hours,
             minutes,
             seconds,
-            fraction: 0,
+            fraction: None,
             utc_offset: 0,
-            fraction_set: false,
         }
     }
 
@@ -72,9 +68,8 @@ impl CdFsDateTime {
             hours: data[3],
             minutes: data[4],
             seconds: data[5],
-            fraction: 0,
+            fraction: None,
             utc_offset: data[6] as i8,
-            fraction_set: false,
         }
     }
 
@@ -187,9 +182,8 @@ impl CdFsDateTime {
             hours,
             minutes,
             seconds,
-            fraction,
+            fraction: Some(fraction),
             utc_offset,
-            fraction_set: true,
         })
     }
 
@@ -201,7 +195,7 @@ impl CdFsDateTime {
             || self.hours != 0
             || self.minutes != 0
             || self.seconds != 0
-            || self.fraction != 0
+            || self.fraction.is_some()
             || self.utc_offset != 0
     }
 
@@ -221,10 +215,9 @@ impl CdFsDateTime {
         let time_zone_hours: u8 = time_zone_intervals / 4;
         let time_zone_minutes: u8 = (time_zone_intervals % 4) * 15;
 
-        let fraction: String = if self.fraction_set {
-            format!(".{:02}", self.fraction)
-        } else {
-            String::new()
+        let fraction: String = match &self.fraction {
+            Some(fraction) => format!(".{:02}", fraction),
+            None => String::new(),
         };
         format!(
             "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}{}{}{:02}:{:02}",
@@ -264,7 +257,7 @@ mod tests {
         assert_eq!(test_struct.hours, 0x14);
         assert_eq!(test_struct.minutes, 0x06);
         assert_eq!(test_struct.seconds, 0x1f);
-        assert_eq!(test_struct.fraction, 0);
+        assert_eq!(test_struct.fraction, None);
         assert_eq!(test_struct.utc_offset, 8);
     }
 
@@ -279,7 +272,7 @@ mod tests {
         assert_eq!(test_struct.hours, 20);
         assert_eq!(test_struct.minutes, 6);
         assert_eq!(test_struct.seconds, 31);
-        assert_eq!(test_struct.fraction, 0);
+        assert_eq!(test_struct.fraction, Some(0));
         assert_eq!(test_struct.utc_offset, 8);
 
         Ok(())
