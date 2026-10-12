@@ -383,99 +383,123 @@ mod tests {
     use keramics_core::open_os_data_stream;
     use keramics_encodings::CharacterEncoding;
 
+    use crate::cdfs::file_system::CdFsFileSystem;
     use crate::cdfs::volume::CdFsVolume;
+    use crate::path::Path;
 
     use crate::tests::get_test_data_path;
 
-    fn get_file_entry() -> Result<CdFsFileEntry, ErrorTrace> {
+    fn get_file_system(path_string: &str) -> Result<CdFsFileSystem, ErrorTrace> {
         let mut volume: CdFsVolume = CdFsVolume::new();
 
-        let path_string: String = get_test_data_path("cdfs/level3.iso");
-        let path_buf: PathBuf = PathBuf::from(path_string.as_str());
+        let test_data_path_string: String = get_test_data_path(path_string);
+        let path_buf: PathBuf = PathBuf::from(test_data_path_string.as_str());
         let data_stream: DataStreamReference = open_os_data_stream(&path_buf)?;
         volume.read_data_stream(&data_stream)?;
 
-        let data_stream: &DataStreamReference = match volume.get_data_stream() {
-            Some(data_stream) => data_stream,
-            None => {
-                return Err(keramics_core::error_trace_new!("Missing data stream"));
-            }
-        };
-        let bytes_per_sector: u16 = volume.get_bytes_per_sector();
-        let directory_record: CdFsDirectoryRecord = volume.get_root_directory().clone();
-        let directory_record_offset: u64 = volume.get_root_directory_record_offset();
-
-        Ok(CdFsFileEntry::new(
-            data_stream,
-            bytes_per_sector,
-            directory_record_offset,
-            directory_record,
-        ))
+        volume.get_file_system()
     }
 
     #[test]
     fn test_get_creation_time() -> Result<(), ErrorTrace> {
-        let file_entry: CdFsFileEntry = get_file_entry()?;
-        assert!(file_entry.get_creation_time().is_none());
+        let cdfs_file_system: CdFsFileSystem = get_file_system("cdfs/level3.iso")?;
+
+        let path: Path = Path::from("/");
+        let cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
+
+        assert_eq!(cdfs_file_entry.get_creation_time(), None);
 
         Ok(())
     }
 
     #[test]
     fn test_get_effective_time() -> Result<(), ErrorTrace> {
-        let file_entry: CdFsFileEntry = get_file_entry()?;
-        assert!(file_entry.get_effective_time().is_none());
+        let cdfs_file_system: CdFsFileSystem = get_file_system("cdfs/level3.iso")?;
+
+        let path: Path = Path::from("/");
+        let cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
+
+        assert_eq!(cdfs_file_entry.get_effective_time(), None);
 
         Ok(())
     }
 
     #[test]
     fn test_get_expiration_time() -> Result<(), ErrorTrace> {
-        let file_entry: CdFsFileEntry = get_file_entry()?;
-        assert!(file_entry.get_expiration_time().is_none());
+        let cdfs_file_system: CdFsFileSystem = get_file_system("cdfs/level3.iso")?;
+
+        let path: Path = Path::from("/");
+        let cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
+
+        assert_eq!(cdfs_file_entry.get_expiration_time(), None);
 
         Ok(())
     }
 
     #[test]
     fn test_get_group_identifier() -> Result<(), ErrorTrace> {
-        let file_entry: CdFsFileEntry = get_file_entry()?;
-        assert!(file_entry.get_group_identifier().is_none());
+        let cdfs_file_system: CdFsFileSystem = get_file_system("cdfs/level3.iso")?;
+
+        let path: Path = Path::from("/");
+        let cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
+
+        assert_eq!(cdfs_file_entry.get_group_identifier(), None);
 
         Ok(())
     }
 
     #[test]
     fn test_get_identifier() -> Result<(), ErrorTrace> {
-        let mut file_entry: CdFsFileEntry = get_file_entry()?;
+        let cdfs_file_system: CdFsFileSystem = get_file_system("cdfs/level3.iso")?;
 
-        assert_eq!(file_entry.get_identifier(), 32924);
+        let path: Path = Path::from("/");
+        let cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
 
-        let sub_file_entry: CdFsFileEntry = file_entry.get_sub_file_entry_by_index(0)?;
+        assert_eq!(cdfs_file_entry.get_identifier(), 32924);
 
-        assert_eq!(sub_file_entry.get_identifier(), 47172);
+        let path: Path = Path::from("/emptyfile");
+        let cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
+
+        assert_eq!(cdfs_file_entry.get_identifier(), 47172);
 
         Ok(())
     }
 
     #[test]
     fn test_get_modification_time() -> Result<(), ErrorTrace> {
-        let file_entry: CdFsFileEntry = get_file_entry()?;
-        assert!(file_entry.get_modification_time().is_none());
+        let cdfs_file_system: CdFsFileSystem = get_file_system("cdfs/level3.iso")?;
+
+        let path: Path = Path::from("/");
+        let cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
+
+        assert_eq!(cdfs_file_entry.get_modification_time(), None);
 
         Ok(())
     }
 
     #[test]
     fn test_get_name() -> Result<(), ErrorTrace> {
-        let mut file_entry: CdFsFileEntry = get_file_entry()?;
+        let cdfs_file_system: CdFsFileSystem = get_file_system("cdfs/level3.iso")?;
 
-        let name: Option<&ByteString> = file_entry.get_name();
+        let path: Path = Path::from("/");
+        let cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
+
+        let name: Option<&ByteString> = cdfs_file_entry.get_name();
         assert_eq!(name, None);
 
-        let sub_file_entry: CdFsFileEntry = file_entry.get_sub_file_entry_by_index(0)?;
+        let path: Path = Path::from("/emptyfile");
+        let cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
 
-        let name: Option<&ByteString> = sub_file_entry.get_name();
+        let name: Option<&ByteString> = cdfs_file_entry.get_name();
         assert_eq!(
             name,
             Some(ByteString {
@@ -484,57 +508,78 @@ mod tests {
             })
             .as_ref(),
         );
+
         Ok(())
     }
 
     #[test]
     fn test_get_owner_identifier() -> Result<(), ErrorTrace> {
-        let file_entry: CdFsFileEntry = get_file_entry()?;
-        assert!(file_entry.get_owner_identifier().is_none());
+        let cdfs_file_system: CdFsFileSystem = get_file_system("cdfs/level3.iso")?;
+
+        let path: Path = Path::from("/");
+        let cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
+
+        assert_eq!(cdfs_file_entry.get_owner_identifier(), None);
 
         Ok(())
     }
 
     #[test]
     fn test_get_permissions() -> Result<(), ErrorTrace> {
-        let file_entry: CdFsFileEntry = get_file_entry()?;
-        assert!(file_entry.get_permissions().is_none());
+        let cdfs_file_system: CdFsFileSystem = get_file_system("cdfs/level3.iso")?;
+
+        let path: Path = Path::from("/");
+        let cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
+
+        assert_eq!(cdfs_file_entry.get_permissions(), None);
 
         Ok(())
     }
 
     #[test]
     fn test_get_size() -> Result<(), ErrorTrace> {
-        let mut file_entry: CdFsFileEntry = get_file_entry()?;
+        let cdfs_file_system: CdFsFileSystem = get_file_system("cdfs/level3.iso")?;
 
-        let sub_file_entry: CdFsFileEntry = file_entry.get_sub_file_entry_by_index(0)?;
-        assert_eq!(sub_file_entry.get_size(), 0);
+        let path: Path = Path::from("/emptyfile");
+        let cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
 
-        let mut sub_file_entry: CdFsFileEntry = file_entry.get_sub_file_entry_by_index(7)?;
-        let name_component: PathComponent = PathComponent::from("TESTFILE1");
-        let sub_file_entry: CdFsFileEntry = sub_file_entry
-            .get_sub_file_entry_by_name(&name_component)?
-            .ok_or_else(|| keramics_core::error_trace_new!("Missing sub file entry"))?;
-        assert_eq!(sub_file_entry.get_size(), 9);
+        assert_eq!(cdfs_file_entry.get_size(), 0);
+
+        let path: Path = Path::from("/testdir1/testfile1");
+        let cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
+
+        assert_eq!(cdfs_file_entry.get_size(), 9);
 
         Ok(())
     }
 
     #[test]
     fn test_get_number_of_sub_file_entries() -> Result<(), ErrorTrace> {
-        let mut file_entry: CdFsFileEntry = get_file_entry()?;
+        let cdfs_file_system: CdFsFileSystem = get_file_system("cdfs/level3.iso")?;
 
-        let number_of_sub_file_entries: usize = file_entry.get_number_of_sub_file_entries()?;
+        let path: Path = Path::from("/");
+        let mut cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
+
+        let number_of_sub_file_entries: usize = cdfs_file_entry.get_number_of_sub_file_entries()?;
         assert_eq!(number_of_sub_file_entries, 8);
 
-        let mut sub_file_entry: CdFsFileEntry = file_entry.get_sub_file_entry_by_index(7)?;
+        let path: Path = Path::from("/testdir1");
+        let mut cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
 
-        let number_of_sub_file_entries: usize = sub_file_entry.get_number_of_sub_file_entries()?;
+        let number_of_sub_file_entries: usize = cdfs_file_entry.get_number_of_sub_file_entries()?;
         assert_eq!(number_of_sub_file_entries, 10);
 
-        let mut sub_file_entry: CdFsFileEntry = file_entry.get_sub_file_entry_by_index(0)?;
+        let path: Path = Path::from("/testdir1/testfile1");
+        let mut cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
 
-        let number_of_sub_file_entries: usize = sub_file_entry.get_number_of_sub_file_entries()?;
+        let number_of_sub_file_entries: usize = cdfs_file_entry.get_number_of_sub_file_entries()?;
         assert_eq!(number_of_sub_file_entries, 0);
 
         Ok(())
@@ -542,9 +587,14 @@ mod tests {
 
     #[test]
     fn test_get_sub_file_entry_by_index() -> Result<(), ErrorTrace> {
-        let mut file_entry: CdFsFileEntry = get_file_entry()?;
+        let cdfs_file_system: CdFsFileSystem = get_file_system("cdfs/level3.iso")?;
 
-        let sub_file_entry: CdFsFileEntry = file_entry.get_sub_file_entry_by_index(0)?;
+        let path: Path = Path::from("/");
+        let mut cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
+
+        let sub_file_entry: CdFsFileEntry = cdfs_file_entry.get_sub_file_entry_by_index(0)?;
+
         let name: Option<&ByteString> = sub_file_entry.get_name();
         assert_eq!(
             name,
@@ -554,7 +604,9 @@ mod tests {
             })
             .as_ref(),
         );
-        let result: Result<CdFsFileEntry, ErrorTrace> = file_entry.get_sub_file_entry_by_index(8);
+
+        let result: Result<CdFsFileEntry, ErrorTrace> =
+            cdfs_file_entry.get_sub_file_entry_by_index(8);
         assert!(result.is_err());
 
         Ok(())
@@ -562,34 +614,22 @@ mod tests {
 
     #[test]
     fn test_get_sub_file_entry_by_name() -> Result<(), ErrorTrace> {
-        let mut file_entry: CdFsFileEntry = get_file_entry()?;
+        let cdfs_file_system: CdFsFileSystem = get_file_system("cdfs/level3.iso")?;
 
-        let name_component: PathComponent = PathComponent::from("EMPTYFILE");
-        let sub_file_entry: CdFsFileEntry = file_entry
-            .get_sub_file_entry_by_name(&name_component)?
-            .ok_or_else(|| keramics_core::error_trace_new!("Missing sub file entry"))?;
-        let name: Option<&ByteString> = sub_file_entry.get_name();
-        assert_eq!(
-            name,
-            Some(ByteString {
-                encoding: CharacterEncoding::Ascii,
-                elements: b"EMPTYFILE.;1".to_vec(),
-            })
-            .as_ref(),
-        );
+        let path: Path = Path::from("/");
+        let mut cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
 
-        let name_component: PathComponent = PathComponent::from("TESTDIR1");
-        let sub_file_entry: CdFsFileEntry = file_entry
-            .get_sub_file_entry_by_name(&name_component)?
-            .ok_or_else(|| keramics_core::error_trace_new!("Missing sub file entry"))?;
-        assert!(sub_file_entry.is_directory());
+        let name: PathComponent = PathComponent::from("EMPTYFILE");
+        let result: Option<CdFsFileEntry> = cdfs_file_entry.get_sub_file_entry_by_name(&name)?;
+        assert!(result.is_some());
 
-        let result: Option<CdFsFileEntry> =
-            file_entry.get_sub_file_entry_by_name(&PathComponent::from("NONEXISTENT"))?;
-        assert!(result.is_none());
+        let name: PathComponent = PathComponent::from("TESTDIR1");
+        let result: Option<CdFsFileEntry> = cdfs_file_entry.get_sub_file_entry_by_name(&name)?;
+        assert!(result.unwrap().is_directory());
 
-        let result: Option<CdFsFileEntry> =
-            file_entry.get_sub_file_entry_by_name(&PathComponent::Root)?;
+        let name: PathComponent = PathComponent::from("NONEXISTENT");
+        let result: Option<CdFsFileEntry> = cdfs_file_entry.get_sub_file_entry_by_name(&name)?;
         assert!(result.is_none());
 
         Ok(())
@@ -597,26 +637,50 @@ mod tests {
 
     #[test]
     fn test_is_directory() -> Result<(), ErrorTrace> {
-        let mut file_entry: CdFsFileEntry = get_file_entry()?;
+        let cdfs_file_system: CdFsFileSystem = get_file_system("cdfs/level3.iso")?;
 
-        assert!(file_entry.is_directory());
+        let path: Path = Path::from("/");
+        let cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
 
-        let sub_file_entry: CdFsFileEntry = file_entry.get_sub_file_entry_by_index(0)?;
+        assert_eq!(cdfs_file_entry.is_directory(), true);
 
-        assert!(!sub_file_entry.is_directory());
+        let path: Path = Path::from("/testdir1");
+        let cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
+
+        assert_eq!(cdfs_file_entry.is_directory(), true);
+
+        let path: Path = Path::from("/testdir1/testfile1");
+        let cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
+
+        assert_eq!(cdfs_file_entry.is_directory(), false);
 
         Ok(())
     }
 
     #[test]
     fn test_is_root_directory() -> Result<(), ErrorTrace> {
-        let mut file_entry: CdFsFileEntry = get_file_entry()?;
+        let cdfs_file_system: CdFsFileSystem = get_file_system("cdfs/level3.iso")?;
 
-        assert!(file_entry.is_root_directory());
+        let path: Path = Path::from("/");
+        let cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
 
-        let sub_file_entry: CdFsFileEntry = file_entry.get_sub_file_entry_by_index(0)?;
+        assert_eq!(cdfs_file_entry.is_root_directory(), true);
 
-        assert!(!sub_file_entry.is_root_directory());
+        let path: Path = Path::from("/testdir1");
+        let cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
+
+        assert_eq!(cdfs_file_entry.is_root_directory(), false);
+
+        let path: Path = Path::from("/testdir1/testfile1");
+        let cdfs_file_entry: CdFsFileEntry =
+            cdfs_file_system.get_file_entry_by_path(&path)?.unwrap();
+
+        assert_eq!(cdfs_file_entry.is_root_directory(), false);
 
         Ok(())
     }
