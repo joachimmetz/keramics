@@ -3,6 +3,8 @@
 [Introduction](introduction.md)
 
 * [Storage media image formats](storage_media_image.md)
+  * [Advanced Forensic Format (AFF)](aff.md)
+  * [Advanced Forensic Format 4 (AFF4)](aff4.md)
   * [Expert Witness Compression Format (EWF)](ewf.md)
   * [Expert Witness Compression Format version 2 (EWF2)](ewf2.md)
   * [Mac OS encrypted encoding](cdsaencr.md)
@@ -39,6 +41,7 @@
   * [Apple File System (APFS)](apfs.md)
 * [Archive formats](archive.md)
   * [Copy in and out (CPIO) archive format](cpio.md)
+  * [ZIP archive format](zip.md)
 * [Assorted formats](assorted.md)
   * [Apple Data Compression (ADC)](adc.md)
   * [LZFSE compressed data](lzfse.md)

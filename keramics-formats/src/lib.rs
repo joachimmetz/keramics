@@ -37,6 +37,7 @@ mod plist;
 mod xml;
 
 // Storage media image formats
+pub mod aff4;
 pub mod ewf;
 pub mod pdi;
 pub mod qcow;
@@ -73,6 +74,7 @@ pub mod xfs;
 
 // Archive formats
 pub mod cpio;
+pub mod zip;
 
 pub use enums::FormatIdentifier;
 pub use file_resolver::{FileResolver, FileResolverReference};

@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use keramics_core::{DataStreamReference, ErrorTrace, open_os_data_stream};
+use keramics_formats::aff4::Aff4Image;
 use keramics_formats::bde::{BdeCredential, BdeEncryptedVolume};
 use keramics_formats::cdsaencr::CdsaEncrCredential;
 use keramics_formats::ewf::EwfImage;
@@ -34,6 +35,9 @@ use keramics_vfs::{VfsCredential, VfsCredentialStore, VfsScanner};
 
 /// Storage media image.
 pub enum StorageMediaImage {
+    Aff4 {
+        aff4_image: Arc<Aff4Image>,
+    },
     Bde {
         bde_volume: BdeEncryptedVolume,
     },
@@ -105,6 +109,7 @@ impl StorageMediaImage {
     /// Retrieves a data stream.
     pub fn get_data_stream(&self) -> Option<DataStreamReference> {
         match self {
+            Self::Aff4 { aff4_image } => Some(aff4_image.get_data_stream()),
             Self::Bde { bde_volume } => bde_volume.get_data_stream(),
             Self::Ewf { ewf_image } => Some(ewf_image.get_data_stream()),
             Self::Luks { luks_volume } => luks_volume.get_data_stream(),
@@ -196,6 +201,7 @@ impl StorageMediaImage {
                 }
             };
         match format_identifier {
+            Some(FormatIdentifier::Aff4) => return Self::open_aff4_image(path),
             Some(FormatIdentifier::CdsaEncr) => {
                 return Err(keramics_core::error_trace_new!(
                     "Store media image is encrypted and requires a credential to be unlocked",
@@ -260,6 +266,39 @@ impl StorageMediaImage {
                 "No storage media image formats found"
             )),
         }
+    }
+
+    /// Opens an AFF4 image.
+    fn open_aff4_image(path: &PathBuf) -> Result<StorageMediaImage, ErrorTrace> {
+        let (base_path, file_name) = match Self::get_base_path_and_file_name(path) {
+            Ok(result) => result,
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(
+                    error,
+                    format!(
+                        "Unable to determine base path and file name of path: {}",
+                        path.display()
+                    )
+                );
+                return Err(error);
+            }
+        };
+        let file_resolver: FileResolverReference =
+            FileResolverReference::new(Box::new(OsFileResolver::new(base_path)));
+        let mut aff4_image: Aff4Image = Aff4Image::new();
+
+        let path_component: PathComponent = PathComponent::from(file_name);
+
+        match aff4_image.open(&file_resolver, &path_component) {
+            Ok(_) => {}
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, "Unable to open AFF4 image");
+                return Err(error);
+            }
+        }
+        Ok(Self::Aff4 {
+            aff4_image: Arc::new(aff4_image),
+        })
     }
 
     /// Opens a BDE encrypted volume.

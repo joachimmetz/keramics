@@ -36,9 +36,10 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y attr ewf-tools exfatprogs genisoimage hfsprogs hfsutils qemu-utils
+        sudo apt-get install -y afflib-tools attr ewf-tools exfatprogs genisoimage hfsprogs hfsutils qemu-utils
     - name: Generate test data
       run: |
+        ./scripts/generate_aff_test_data_linux.sh
         ./scripts/generate_lvm_test_data_linux.sh
         ./scripts/generate_luks_test_data_linux.sh
         ./scripts/generate_mbr_test_data_linux.sh
@@ -61,6 +62,7 @@ jobs:
       with:
         name: test-data-linux
         path: |
+          test_data/aff/*.AFF
           test_data/ewf/*.E01
           test_data/exfat/*.raw
           test_data/ext/*.raw

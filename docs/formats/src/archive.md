@@ -6,3 +6,4 @@ distribution.
 ## Formats
 
 * [Copy in and out (CPIO) archive format](cpio.md)
+* [ZIP archive format](zip.md)
