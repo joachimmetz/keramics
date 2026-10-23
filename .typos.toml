@@ -31,6 +31,9 @@ extend-ignore-re = [
     # Ignore "mke2fs"
     "\\bmke2fs\\b",
 
+    # Ignore "acquisition_tecnician" (a field name in the AFF format)
+    "\\bacquisition_tecnician\\b",
+
     # Ignore "U+####"
     "\\bU\\+[0-9a-f]{4}\\b"
 ]

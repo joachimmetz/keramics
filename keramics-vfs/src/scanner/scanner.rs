@@ -15,6 +15,7 @@ use std::collections::HashSet;
 
 use keramics_core::{DataStreamReference, ErrorTrace};
 
+use keramics_formats::aff4::Aff4Image;
 use keramics_formats::apfs::{ApfsContainer, ApfsCredential, ApfsVolume};
 use keramics_formats::apm::ApmVolumeSystem;
 use keramics_formats::bde::BdeEncryptedVolume;
@@ -39,6 +40,7 @@ use keramics_formats::vmdk::VmdkImage;
 use keramics_formats::volsnap::VolsnapShadowStorage;
 use keramics_formats::{FormatIdentifier, FormatScanner, PartitionIterator, Path};
 
+use crate::aff4::Aff4FileSystem;
 use crate::apfs::ApfsContainerFileSystem;
 use crate::bde::BdeFileSystem;
 use crate::credential::VfsCredential;
@@ -103,6 +105,7 @@ impl VfsScanner {
 
     /// Builds the scanner.
     pub fn build(&mut self) -> Result<(), ErrorTrace> {
+        self.storage_media_image_scanner.add_aff4_signatures();
         self.storage_media_image_scanner.add_cdsaencr_signatures();
         self.storage_media_image_scanner.add_ewf_signatures();
         self.storage_media_image_scanner.add_pdi_signatures();
@@ -220,6 +223,7 @@ impl VfsScanner {
     /// Retrieves a VFS type for a format identifier.
     fn get_vfs_type(format_identifier: &FormatIdentifier) -> Option<VfsType> {
         match format_identifier {
+            FormatIdentifier::Aff4 => Some(VfsType::Aff4),
             FormatIdentifier::Apfs => Some(VfsType::ApfsContainer),
             FormatIdentifier::Apm => Some(VfsType::Apm),
             FormatIdentifier::Bde => Some(VfsType::Bde),
@@ -507,7 +511,8 @@ impl VfsScanner {
                     Err(error)
                 }
             },
-            VfsType::Ewf
+            VfsType::Aff4
+            | VfsType::Ewf
             | VfsType::SparseBundle
             | VfsType::SparseImage
             | VfsType::SplitRaw
@@ -1125,6 +1130,30 @@ impl VfsScanner {
         let path: &Path = vfs_location.get_path();
 
         match scan_node.get_type() {
+            VfsType::Aff4 => {
+                let mut aff4_image: Aff4Image = Aff4Image::new();
+
+                match Aff4FileSystem::open_image(&mut aff4_image, file_system, path) {
+                    Ok(_) => {}
+                    Err(mut error) => {
+                        keramics_core::error_trace_add_frame!(error, "Unable to open AFF4 image");
+                        return Err(error);
+                    }
+                }
+                match self.scan_for_storage_media_image_sub_nodes(
+                    scan_options,
+                    vfs_location,
+                    scan_node,
+                    Aff4FileSystem::PATH_PREFIX,
+                    aff4_image.get_number_of_images(),
+                ) {
+                    Ok(_) => {}
+                    Err(mut error) => {
+                        keramics_core::error_trace_add_frame!(error, "Unable to scan AFF4 volume");
+                        return Err(error);
+                    }
+                }
+            }
             VfsType::Apfs
             | VfsType::ExFat
             | VfsType::Ext
@@ -1967,6 +1996,41 @@ mod tests {
     }
 
     #[test]
+    fn test_scan_with_aff4() -> Result<(), ErrorTrace> {
+        let format_scanner: VfsScanner = get_format_scanner()?;
+
+        let mut scan_options: VfsScanOptions = VfsScanOptions::new();
+        scan_options.parse_partitions("1")?;
+
+        let mut scan_context: VfsScanContext = VfsScanContext::new();
+        let path_string: String = get_test_data_path("aff4/ext2.aff4");
+        let vfs_location: VfsLocation = VfsLocation::from(&path_string);
+        format_scanner.scan(&scan_options, &mut scan_context, &vfs_location)?;
+
+        let scan_node: &VfsScanNode = scan_context.root_node.as_ref().unwrap();
+        let vfs_type: &VfsType = scan_node.get_type();
+        assert_eq!(vfs_type, &VfsType::Os);
+        assert_eq!(scan_node.sub_nodes.len(), 1);
+
+        let scan_node: &VfsScanNode = scan_node.sub_nodes.get(0).unwrap();
+        let vfs_type: &VfsType = scan_node.get_type();
+        assert_eq!(vfs_type, &VfsType::Aff4);
+        assert_eq!(scan_node.sub_nodes.len(), 1);
+
+        let scan_node: &VfsScanNode = scan_node.sub_nodes.get(0).unwrap();
+        let vfs_type: &VfsType = scan_node.get_type();
+        assert_eq!(vfs_type, &VfsType::Aff4);
+        assert_eq!(scan_node.sub_nodes.len(), 1);
+
+        let scan_node: &VfsScanNode = scan_node.sub_nodes.get(0).unwrap();
+        let vfs_type: &VfsType = scan_node.get_type();
+        assert_eq!(vfs_type, &VfsType::Ext);
+        assert_eq!(scan_node.sub_nodes.len(), 0);
+
+        Ok(())
+    }
+
+    #[test]
     fn test_scan_with_apfs() -> Result<(), ErrorTrace> {
         let format_scanner: VfsScanner = get_format_scanner()?;
 
@@ -2229,6 +2293,21 @@ mod tests {
     }
 
     // TODO: add test for scan_for_format with unsupported path type
+
+    #[test]
+    fn test_scan_for_storage_media_image_format_with_aff4() -> Result<(), ErrorTrace> {
+        let format_scanner: VfsScanner = get_format_scanner()?;
+
+        let path_string: String = get_test_data_path("aff4/ext2.aff4");
+        let data_stream: DataStreamReference = get_data_stream(path_string.as_str())?;
+        let format_identifier: FormatIdentifier = format_scanner
+            .scan_for_storage_media_image_format(&data_stream)?
+            .unwrap();
+
+        assert_eq!(format_identifier, FormatIdentifier::Aff4);
+
+        Ok(())
+    }
 
     #[test]
     fn test_scan_for_storage_media_image_format_with_ewf() -> Result<(), ErrorTrace> {

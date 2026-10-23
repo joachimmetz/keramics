@@ -21,6 +21,7 @@ use keramics_formats::ntfs::NtfsFileSystem;
 use keramics_formats::xfs::XfsFileSystem;
 use keramics_formats::{Path, PathComponent};
 
+use super::aff4::{Aff4FileEntry, Aff4FileSystem};
 use super::apfs::{ApfsContainerFileEntry, ApfsContainerFileSystem};
 use super::apm::{ApmFileEntry, ApmFileSystem};
 use super::bde::{BdeFileEntry, BdeFileSystem};
@@ -50,6 +51,7 @@ use super::volsnap::{VolsnapFileEntry, VolsnapFileSystem};
 
 /// Virtual File System (VFS) file system.
 pub enum VfsFileSystem {
+    Aff4(Aff4FileSystem),
     Apfs(Option<ApfsFileSystem>),
     ApfsContainer(ApfsContainerFileSystem),
     Apm(ApmFileSystem),
@@ -85,6 +87,7 @@ impl VfsFileSystem {
     /// Creates a new file system.
     pub fn new(location_type: &VfsType) -> Self {
         match location_type {
+            VfsType::Aff4 => VfsFileSystem::Aff4(Aff4FileSystem::new()),
             VfsType::Apfs => VfsFileSystem::Apfs(None),
             VfsType::ApfsContainer => VfsFileSystem::ApfsContainer(ApfsContainerFileSystem::new()),
             VfsType::Apm => VfsFileSystem::Apm(ApmFileSystem::new()),
@@ -120,6 +123,7 @@ impl VfsFileSystem {
     /// Determines if the file entry with the specified path exists.
     pub fn file_entry_exists(&self, path: &Path) -> Result<bool, ErrorTrace> {
         match self {
+            VfsFileSystem::Aff4(aff4_file_system) => Ok(aff4_file_system.file_entry_exists(path)),
             VfsFileSystem::Apfs(value) => match value {
                 Some(apfs_file_system) => match apfs_file_system.get_file_entry_by_path(path) {
                     Ok(Some(_)) => Ok(true),
@@ -319,6 +323,12 @@ impl VfsFileSystem {
     /// Retrieves a file entry with the specified path.
     pub fn get_file_entry_by_path(&self, path: &Path) -> Result<Option<VfsFileEntry>, ErrorTrace> {
         let result: Result<Option<VfsFileEntry>, ErrorTrace> = match self {
+            VfsFileSystem::Aff4(aff4_file_system) => {
+                match aff4_file_system.get_file_entry_by_path(path)? {
+                    Some(aff4_file_entry) => Ok(Some(VfsFileEntry::Aff4(aff4_file_entry))),
+                    None => Ok(None),
+                }
+            }
             VfsFileSystem::Apfs(value) => match value {
                 Some(apfs_file_system) => match apfs_file_system.get_file_entry_by_path(path)? {
                     Some(apfs_file_entry) => Ok(Some(VfsFileEntry::Apfs(apfs_file_entry))),
@@ -517,6 +527,11 @@ impl VfsFileSystem {
     /// Retrieves the root file entry.
     pub fn get_root_file_entry(&self) -> Result<Option<VfsFileEntry>, ErrorTrace> {
         match self {
+            VfsFileSystem::Aff4(aff4_file_system) => {
+                let aff4_file_entry: Aff4FileEntry = aff4_file_system.get_root_file_entry();
+
+                Ok(Some(VfsFileEntry::Aff4(aff4_file_entry)))
+            }
             VfsFileSystem::Apfs(value) => match value {
                 Some(apfs_file_system) => match apfs_file_system.get_root_directory() {
                     Ok(Some(apfs_file_entry)) => Ok(Some(VfsFileEntry::Apfs(apfs_file_entry))),
@@ -727,6 +742,7 @@ impl VfsFileSystem {
     #[allow(dead_code)]
     pub(super) fn get_type(&self) -> VfsType {
         match self {
+            VfsFileSystem::Aff4(_) => VfsType::Aff4,
             VfsFileSystem::Apfs(_) => VfsType::Apfs,
             VfsFileSystem::ApfsContainer(_) => VfsType::ApfsContainer,
             VfsFileSystem::Apm(_) => VfsType::Apm,
@@ -766,6 +782,9 @@ impl VfsFileSystem {
         vfs_location: &VfsLocation,
     ) -> Result<(), ErrorTrace> {
         let result: Result<(), ErrorTrace> = match self {
+            VfsFileSystem::Aff4(aff4_file_system) => {
+                aff4_file_system.open(parent_file_system, vfs_location)
+            }
             VfsFileSystem::Apfs(value) => {
                 match Self::open_apfs_file_system(parent_file_system, vfs_location) {
                     Ok(apfs_file_system) => {
@@ -1417,6 +1436,71 @@ mod tests {
     #[test]
     fn test_get_file_entry_by_path_with_apm_root() -> Result<(), ErrorTrace> {
         let vfs_file_system: VfsFileSystem = get_apm_file_system()?;
+
+        let path: Path = Path::from("/");
+        let vfs_file_entry: VfsFileEntry = vfs_file_system.get_file_entry_by_path(&path)?.unwrap();
+
+        let vfs_file_type: VfsFileType = vfs_file_entry.get_file_type();
+        assert_eq!(vfs_file_type, VfsFileType::Directory);
+
+        Ok(())
+    }
+
+    // Tests with AFF4.
+
+    fn get_aff4_file_system() -> Result<VfsFileSystem, ErrorTrace> {
+        let mut vfs_file_system: VfsFileSystem = VfsFileSystem::new(&VfsType::Aff4);
+
+        let parent_file_system: VfsFileSystemReference =
+            VfsFileSystemReference::new(VfsFileSystem::new(&VfsType::Os));
+        let path_string: String = get_test_data_path("aff4/ext2.aff4");
+        let vfs_location: VfsLocation = VfsLocation::from(&path_string);
+        vfs_file_system.open(Some(&parent_file_system), &vfs_location)?;
+
+        Ok(vfs_file_system)
+    }
+
+    #[test]
+    fn test_file_entry_exists_with_aff4() -> Result<(), ErrorTrace> {
+        let vfs_file_system: VfsFileSystem = get_aff4_file_system()?;
+
+        let path: Path = Path::from("/aff41");
+        assert_eq!(vfs_file_system.file_entry_exists(&path)?, true);
+
+        let path: Path = Path::from("/bogus");
+        assert_eq!(vfs_file_system.file_entry_exists(&path)?, false);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_file_entry_by_path_with_aff4_non_existing() -> Result<(), ErrorTrace> {
+        let vfs_file_system: VfsFileSystem = get_aff4_file_system()?;
+
+        let path: Path = Path::from("/bogus");
+        let result: Option<VfsFileEntry> = vfs_file_system.get_file_entry_by_path(&path)?;
+
+        assert!(result.is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_file_entry_by_path_with_aff4_stream() -> Result<(), ErrorTrace> {
+        let vfs_file_system: VfsFileSystem = get_aff4_file_system()?;
+
+        let path: Path = Path::from("/aff41");
+        let vfs_file_entry: VfsFileEntry = vfs_file_system.get_file_entry_by_path(&path)?.unwrap();
+
+        let vfs_file_type: VfsFileType = vfs_file_entry.get_file_type();
+        assert_eq!(vfs_file_type, VfsFileType::File);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_file_entry_by_path_with_aff4_root() -> Result<(), ErrorTrace> {
+        let vfs_file_system: VfsFileSystem = get_aff4_file_system()?;
 
         let path: Path = Path::from("/");
         let vfs_file_entry: VfsFileEntry = vfs_file_system.get_file_entry_by_path(&path)?.unwrap();

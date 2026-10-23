@@ -16,6 +16,7 @@ use std::fmt;
 /// Format identifier.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum FormatIdentifier {
+    Aff4,
     Apfs,
     Apm,
     Bde,
@@ -52,7 +53,8 @@ impl FormatIdentifier {
     /// Determines if the format identifier represents a storage media image format.
     pub fn is_storage_media_image_format(&self) -> bool {
         match self {
-            FormatIdentifier::CdsaEncr
+            FormatIdentifier::Aff4
+            | FormatIdentifier::CdsaEncr
             | FormatIdentifier::Ewf
             | FormatIdentifier::Pdi
             | FormatIdentifier::Qcow
@@ -73,6 +75,7 @@ impl fmt::Display for FormatIdentifier {
     /// Formats the format identifier for display.
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         let string: &str = match self {
+            FormatIdentifier::Aff4 => "aff4",
             FormatIdentifier::Apfs => "apfs",
             FormatIdentifier::Apm => "apm",
             FormatIdentifier::Bde => "bde",
@@ -114,6 +117,10 @@ mod tests {
 
     #[test]
     fn test_format_identifier_fmt() {
+        let format_identifier: FormatIdentifier = FormatIdentifier::Aff4;
+        let string: String = format_identifier.to_string();
+        assert_eq!(string, "aff4");
+
         let format_identifier: FormatIdentifier = FormatIdentifier::Apfs;
         let string: String = format_identifier.to_string();
         assert_eq!(string, "apfs");

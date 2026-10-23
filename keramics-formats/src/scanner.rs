@@ -55,6 +55,19 @@ impl FormatScanner {
         }
     }
 
+    /// Adds Advanced Forensic Format 4 (AFF4) signatures.
+    pub fn add_aff4_signatures(&mut self) {
+        // An AFF4 volume is a Zip (ZIP) archive in which the first entry is the
+        // "container.description" container, whose name directly follows the
+        // local file header at a fixed offset.
+        self.signature_scanner.add_signature(Signature::new(
+            "aff41",
+            PatternType::BoundToStart,
+            30,
+            b"container.description",
+        ));
+    }
+
     /// Adds Apple File System (APFS) signatures.
     pub fn add_apfs_signatures(&mut self) {
         self.signature_scanner.add_signature(Signature::new(
@@ -510,6 +523,7 @@ impl FormatScanner {
         let mut scan_results: HashSet<FormatIdentifier> = HashSet::new();
         for signature in scan_context.results.values() {
             let format_identifier: FormatIdentifier = match signature.identifier.as_str() {
+                "aff41" => FormatIdentifier::Aff4,
                 "apfs1" => FormatIdentifier::Apfs,
                 "apm1" | "apm2" => FormatIdentifier::Apm,
                 "bde1" | "bde2" | "bde3" | "bde4" => FormatIdentifier::Bde,
@@ -557,6 +571,7 @@ mod tests {
     #[test]
     fn test_build() -> Result<(), ErrorTrace> {
         let mut format_scanner: FormatScanner = FormatScanner::new();
+        format_scanner.add_aff4_signatures();
         format_scanner.add_apfs_signatures();
         format_scanner.add_apm_signatures();
         format_scanner.add_bde_signatures();
@@ -588,6 +603,7 @@ mod tests {
     #[test]
     fn test_scan_data_stream() -> Result<(), ErrorTrace> {
         let mut format_scanner: FormatScanner = FormatScanner::new();
+        format_scanner.add_aff4_signatures();
         format_scanner.add_apfs_signatures();
         format_scanner.add_apm_signatures();
         format_scanner.add_bde_signatures();
@@ -628,6 +644,30 @@ mod tests {
 
         assert_eq!(scan_results.len(), 1);
         assert_eq!(scan_results.iter().next(), Some(&FormatIdentifier::Qcow));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_scan_data_stream_with_aff4() -> Result<(), ErrorTrace> {
+        let mut format_scanner: FormatScanner = FormatScanner::new();
+        format_scanner.add_aff4_signatures();
+
+        match format_scanner.build() {
+            Ok(_) => {}
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, "Unable to build format scanner");
+                return Err(error);
+            }
+        };
+        let path_string: String = get_test_data_path("aff4/ext2.aff4");
+        let path_buf: PathBuf = PathBuf::from(path_string.as_str());
+        let data_stream: DataStreamReference = open_os_data_stream(&path_buf)?;
+        let scan_results: HashSet<FormatIdentifier> =
+            format_scanner.scan_data_stream(&data_stream)?;
+
+        assert_eq!(scan_results.len(), 1);
+        assert_eq!(scan_results.iter().next(), Some(&FormatIdentifier::Aff4));
 
         Ok(())
     }

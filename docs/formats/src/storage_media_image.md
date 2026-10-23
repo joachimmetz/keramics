@@ -5,6 +5,8 @@ a floppy or optical disk like CD-ROM or DVD.
 
 ## Formats
 
+* [Advanced Forensic Format (AFF)](aff.md)
+* [Advanced Forensic Format 4 (AFF4)](aff4.md)
 * [Expert Witness Compression Format (EWF)](ewf.md)
 * [Expert Witness Compression Format version 2 (EWF2)](ewf2.md)
 * [Mac OS sparse bundle](sparsebundle.md)

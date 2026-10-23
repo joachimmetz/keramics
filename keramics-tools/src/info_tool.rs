@@ -39,10 +39,10 @@ mod storage_media_image;
 
 use crate::enums::{DisplayPathType, EncodingType, FormatType};
 use crate::info::{
-    ApfsInfo, ApmInfo, BdeInfo, BsdDiskLabelInfo, CdsaEncrInfo, CpioInfo, EwfInfo, ExFatInfo,
-    ExtInfo, FatInfo, GptInfo, HfsInfo, LinuxLvmInfo, LuksInfo, MbrInfo, NtfsInfo, PdiInfo,
-    QcowInfo, SgiDiskLabelInfo, SparseBundleInfo, SparseImageInfo, UdifInfo, VdiInfo, VhdInfo,
-    VhdxInfo, VmdkInfo, VolsnapInfo, XfsInfo,
+    Aff4Info, ApfsInfo, ApmInfo, BdeInfo, BsdDiskLabelInfo, CdsaEncrInfo, CpioInfo, EwfInfo,
+    ExFatInfo, ExtInfo, FatInfo, GptInfo, HfsInfo, LinuxLvmInfo, LuksInfo, MbrInfo, NtfsInfo,
+    PdiInfo, QcowInfo, SgiDiskLabelInfo, SparseBundleInfo, SparseImageInfo, UdifInfo, VdiInfo,
+    VhdInfo, VhdxInfo, VmdkInfo, VolsnapInfo, XfsInfo,
 };
 use crate::range_file_resolver::RangeFileResolver;
 use crate::storage_media_image::StorageMediaImage;
@@ -368,6 +368,7 @@ impl InfoTool {
         let mut format_scanner: FormatScanner = FormatScanner::new();
 
         if !self.contents_mode {
+            format_scanner.add_aff4_signatures();
             format_scanner.add_cdsaencr_signatures();
             format_scanner.add_ewf_signatures();
             format_scanner.add_pdi_signatures();
@@ -575,6 +576,7 @@ fn main() -> ExitCode {
             }
         };
     let format_identifier: FormatIdentifier = match &arguments.format {
+        Some(FormatType::Aff4) => FormatIdentifier::Aff4,
         Some(FormatType::Apfs) => FormatIdentifier::Apfs,
         Some(FormatType::Apm) => FormatIdentifier::Apm,
         Some(FormatType::Bde) => FormatIdentifier::Bde,
@@ -733,6 +735,7 @@ fn main() -> ExitCode {
             }
         }
         None => match &format_identifier {
+            FormatIdentifier::Aff4 => Aff4Info::print_image(&arguments.source),
             FormatIdentifier::Apfs => ApfsInfo::print_container(&data_stream),
             FormatIdentifier::Apm => ApmInfo::print_volume_system(&data_stream),
             FormatIdentifier::Bde => BdeInfo::print_encrypted_volume(&data_stream),
