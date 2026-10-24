@@ -105,6 +105,7 @@ impl VfsScanner {
 
     /// Builds the scanner.
     pub fn build(&mut self) -> Result<(), ErrorTrace> {
+        self.storage_media_image_scanner.add_aff_signatures();
         self.storage_media_image_scanner.add_aff4_signatures();
         self.storage_media_image_scanner.add_cdsaencr_signatures();
         self.storage_media_image_scanner.add_ewf_signatures();
@@ -2293,6 +2294,21 @@ mod tests {
     }
 
     // TODO: add test for scan_for_format with unsupported path type
+
+    #[test]
+    fn test_scan_for_storage_media_image_format_with_aff() -> Result<(), ErrorTrace> {
+        let format_scanner: VfsScanner = get_format_scanner()?;
+
+        let path_string: String = get_test_data_path("aff/ext2.AFF");
+        let data_stream: DataStreamReference = get_data_stream(path_string.as_str())?;
+        let format_identifier: FormatIdentifier = format_scanner
+            .scan_for_storage_media_image_format(&data_stream)?
+            .unwrap();
+
+        assert_eq!(format_identifier, FormatIdentifier::Aff);
+
+        Ok(())
+    }
 
     #[test]
     fn test_scan_for_storage_media_image_format_with_aff4() -> Result<(), ErrorTrace> {
