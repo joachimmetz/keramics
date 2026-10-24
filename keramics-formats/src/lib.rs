@@ -37,6 +37,7 @@ mod plist;
 mod xml;
 
 // Storage media image formats
+pub mod aff;
 pub mod aff4;
 pub mod ewf;
 pub mod pdi;
