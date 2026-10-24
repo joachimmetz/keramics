@@ -11,6 +11,7 @@
  * under the License.
  */
 
+mod aff;
 mod aff4;
 mod apfs;
 mod apm;
@@ -44,6 +45,7 @@ mod volsnap;
 mod windows;
 mod xfs;
 
+pub use aff::AffInfo;
 pub use aff4::Aff4Info;
 pub use apfs::ApfsInfo;
 pub use apm::ApmInfo;

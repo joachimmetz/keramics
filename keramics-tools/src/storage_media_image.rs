@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use keramics_core::{DataStreamReference, ErrorTrace, open_os_data_stream};
+use keramics_formats::aff::AffImage;
 use keramics_formats::aff4::Aff4Image;
 use keramics_formats::bde::{BdeCredential, BdeEncryptedVolume};
 use keramics_formats::cdsaencr::CdsaEncrCredential;
@@ -35,6 +36,9 @@ use keramics_vfs::{VfsCredential, VfsCredentialStore, VfsScanner};
 
 /// Storage media image.
 pub enum StorageMediaImage {
+    Aff {
+        aff_image: Arc<AffImage>,
+    },
     Aff4 {
         aff4_image: Arc<Aff4Image>,
     },
@@ -109,6 +113,7 @@ impl StorageMediaImage {
     /// Retrieves a data stream.
     pub fn get_data_stream(&self) -> Option<DataStreamReference> {
         match self {
+            Self::Aff { aff_image } => Some(aff_image.get_data_stream()),
             Self::Aff4 { aff4_image } => Some(aff4_image.get_data_stream()),
             Self::Bde { bde_volume } => bde_volume.get_data_stream(),
             Self::Ewf { ewf_image } => Some(ewf_image.get_data_stream()),
@@ -143,6 +148,7 @@ impl StorageMediaImage {
     #[allow(dead_code)]
     pub fn get_md5_hash(&self) -> Option<Vec<u8>> {
         match self {
+            Self::Aff { aff_image } => aff_image.get_segment_data("md5").ok(),
             Self::Ewf { ewf_image } => Some(ewf_image.get_md5_hash().to_vec()),
             _ => None,
         }
@@ -152,6 +158,7 @@ impl StorageMediaImage {
     #[allow(dead_code)]
     pub fn get_sha1_hash(&self) -> Option<Vec<u8>> {
         match self {
+            Self::Aff { aff_image } => aff_image.get_segment_data("sha1").ok(),
             Self::Ewf { ewf_image } => Some(ewf_image.get_sha1_hash().to_vec()),
             _ => None,
         }
@@ -201,6 +208,7 @@ impl StorageMediaImage {
                 }
             };
         match format_identifier {
+            Some(FormatIdentifier::Aff) => return Self::open_aff_image(path),
             Some(FormatIdentifier::Aff4) => return Self::open_aff4_image(path),
             Some(FormatIdentifier::CdsaEncr) => {
                 return Err(keramics_core::error_trace_new!(
@@ -266,6 +274,39 @@ impl StorageMediaImage {
                 "No storage media image formats found"
             )),
         }
+    }
+
+    /// Opens an AFF image.
+    fn open_aff_image(path: &PathBuf) -> Result<StorageMediaImage, ErrorTrace> {
+        let (base_path, file_name) = match Self::get_base_path_and_file_name(path) {
+            Ok(result) => result,
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(
+                    error,
+                    format!(
+                        "Unable to determine base path and file name of path: {}",
+                        path.display()
+                    )
+                );
+                return Err(error);
+            }
+        };
+        let file_resolver: FileResolverReference =
+            FileResolverReference::new(Box::new(OsFileResolver::new(base_path)));
+        let mut aff_image: AffImage = AffImage::new();
+
+        let path_component: PathComponent = PathComponent::from(file_name);
+
+        match aff_image.open(&file_resolver, &path_component) {
+            Ok(_) => {}
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, "Unable to open AFF image");
+                return Err(error);
+            }
+        }
+        Ok(Self::Aff {
+            aff_image: Arc::new(aff_image),
+        })
     }
 
     /// Opens an AFF4 image.

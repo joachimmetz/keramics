@@ -205,6 +205,9 @@ pub enum EncodingType {
 /// Format types.
 #[derive(Clone, ValueEnum)]
 pub enum FormatType {
+    /// Advanced Forensic Format (AFF)
+    Aff,
+
     /// Advanced Forensic Format (AFF4)
     Aff4,
 

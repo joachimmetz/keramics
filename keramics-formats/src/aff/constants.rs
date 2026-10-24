@@ -12,7 +12,7 @@
  */
 
 /// AFF file header signature.
-pub(super) const AFF_FILE_SIGNATURE: [u8; 8] = *b"AFF10\r\n\0";
+pub(crate) const AFF_FILE_SIGNATURE: [u8; 8] = *b"AFF10\r\n\0";
 
 /// AFF file header signature size.
 pub(super) const AFF_FILE_SIGNATURE_SIZE: u64 = 8;
