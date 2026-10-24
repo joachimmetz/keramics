@@ -38,7 +38,7 @@ pub struct Aff4FileSystem {
 }
 
 impl Aff4FileSystem {
-    pub const PATH_PREFIX: &'static str = "/aff4";
+    pub const PATH_PREFIX: &'static str = "/aff4.s";
 
     /// Creates a new file system.
     pub fn new() -> Self {
@@ -58,7 +58,7 @@ impl Aff4FileSystem {
                 if path.get_number_of_components() > 2 {
                     return false;
                 }
-                match VfsPath::get_numeric_suffix(path_component, "aff4") {
+                match VfsPath::get_numeric_suffix(path_component, "aff4.s") {
                     Some(stream_index) => {
                         stream_index >= 1 && stream_index <= self.number_of_streams
                     }
@@ -80,7 +80,7 @@ impl Aff4FileSystem {
                     return Ok(None);
                 }
                 let mut stream_index: usize =
-                    match VfsPath::get_numeric_suffix(path_component, "aff4") {
+                    match VfsPath::get_numeric_suffix(path_component, "aff4.s") {
                         Some(stream_index) => stream_index,
                         None => return Ok(None),
                     };
@@ -214,15 +214,15 @@ mod tests {
         let result: bool = aff4_file_system.file_entry_exists(&path);
         assert_eq!(result, true);
 
-        let path: Path = Path::from("/aff41");
+        let path: Path = Path::from("/aff4.s1");
         let result: bool = aff4_file_system.file_entry_exists(&path);
         assert_eq!(result, true);
 
-        let path: Path = Path::from("/aff499");
+        let path: Path = Path::from("/aff4.s99");
         let result: bool = aff4_file_system.file_entry_exists(&path);
         assert_eq!(result, false);
 
-        let path: Path = Path::from("aff41");
+        let path: Path = Path::from("aff4.s1");
         let result: bool = aff4_file_system.file_entry_exists(&path);
         assert_eq!(result, false);
 
@@ -230,7 +230,7 @@ mod tests {
         let result: bool = aff4_file_system.file_entry_exists(&path);
         assert_eq!(result, false);
 
-        let path: Path = Path::from("/aff41/bogus1");
+        let path: Path = Path::from("/aff4.s1/bogus1");
         let result: bool = aff4_file_system.file_entry_exists(&path);
         assert_eq!(result, false);
 
@@ -253,14 +253,14 @@ mod tests {
         let file_type: VfsFileType = aff4_file_entry.get_file_type();
         assert_eq!(file_type, VfsFileType::Directory);
 
-        let path: Path = Path::from("/aff41");
+        let path: Path = Path::from("/aff4.s1");
         let result: Option<Aff4FileEntry> = aff4_file_system.get_file_entry_by_path(&path)?;
         assert!(result.is_some());
 
         let aff4_file_entry: Aff4FileEntry = result.unwrap();
 
         let name: PathComponent = aff4_file_entry.get_name();
-        assert_eq!(name, PathComponent::from("aff41"));
+        assert_eq!(name, PathComponent::from("aff4.s1"));
 
         let file_type: VfsFileType = aff4_file_entry.get_file_type();
         assert_eq!(file_type, VfsFileType::File);

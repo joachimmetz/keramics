@@ -29,6 +29,7 @@ use keramics_formats::xfs::constants::*;
 use keramics_formats::{ExtendedAttributeIterator, FileEntryIterator, Path, PathComponent};
 use keramics_types::Ucs2String;
 
+use super::aff::AffFileEntry;
 use super::aff4::Aff4FileEntry;
 use super::apfs::ApfsContainerFileEntry;
 use super::apm::ApmFileEntry;
@@ -61,6 +62,7 @@ use super::volsnap::VolsnapFileEntry;
 
 /// Virtual File System (VFS) file entry.
 pub enum VfsFileEntry {
+    Aff(AffFileEntry),
     Aff4(Aff4FileEntry),
     Apfs(ApfsFileEntry),
     ApfsContainer(ApfsContainerFileEntry),
@@ -101,6 +103,7 @@ impl VfsFileEntry {
             | VfsFileEntry::Apm(_)
             | VfsFileEntry::Bde(_)
             | VfsFileEntry::Luksde(_)
+            | VfsFileEntry::Aff(_)
             | VfsFileEntry::Aff4(_)
             | VfsFileEntry::Ewf(_)
             | VfsFileEntry::Gpt(_)
@@ -137,6 +140,7 @@ impl VfsFileEntry {
             | VfsFileEntry::Apm(_)
             | VfsFileEntry::Bde(_)
             | VfsFileEntry::Luksde(_)
+            | VfsFileEntry::Aff(_)
             | VfsFileEntry::Aff4(_)
             | VfsFileEntry::Ewf(_)
             | VfsFileEntry::ExFat(_)
@@ -173,6 +177,7 @@ impl VfsFileEntry {
             | VfsFileEntry::Apm(_)
             | VfsFileEntry::Bde(_)
             | VfsFileEntry::Luksde(_)
+            | VfsFileEntry::Aff(_)
             | VfsFileEntry::Aff4(_)
             | VfsFileEntry::Ewf(_)
             | VfsFileEntry::Gpt(_)
@@ -211,6 +216,7 @@ impl VfsFileEntry {
             | VfsFileEntry::Apm(_)
             | VfsFileEntry::Bde(_)
             | VfsFileEntry::Luksde(_)
+            | VfsFileEntry::Aff(_)
             | VfsFileEntry::Aff4(_)
             | VfsFileEntry::Ewf(_)
             | VfsFileEntry::ExFat(_)
@@ -252,6 +258,7 @@ impl VfsFileEntry {
             | VfsFileEntry::Apm(_)
             | VfsFileEntry::Bde(_)
             | VfsFileEntry::Luksde(_)
+            | VfsFileEntry::Aff(_)
             | VfsFileEntry::Aff4(_)
             | VfsFileEntry::Ewf(_)
             | VfsFileEntry::ExFat(_)
@@ -306,6 +313,7 @@ impl VfsFileEntry {
             VfsFileEntry::Apm(apm_file_entry) => apm_file_entry.get_file_type(),
             VfsFileEntry::Bde(bde_file_entry) => bde_file_entry.get_file_type(),
             VfsFileEntry::Luksde(luks_file_entry) => luks_file_entry.get_file_type(),
+            VfsFileEntry::Aff(aff_file_entry) => aff_file_entry.get_file_type(),
             VfsFileEntry::Aff4(aff4_file_entry) => aff4_file_entry.get_file_type(),
             VfsFileEntry::Ewf(ewf_file_entry) => ewf_file_entry.get_file_type(),
             VfsFileEntry::ExFat(exfat_file_entry) => {
@@ -408,6 +416,7 @@ impl VfsFileEntry {
             | VfsFileEntry::Apm(_)
             | VfsFileEntry::Bde(_)
             | VfsFileEntry::Luksde(_)
+            | VfsFileEntry::Aff(_)
             | VfsFileEntry::Aff4(_)
             | VfsFileEntry::Ewf(_)
             | VfsFileEntry::Gpt(_)
@@ -444,6 +453,7 @@ impl VfsFileEntry {
             | VfsFileEntry::Apm(_)
             | VfsFileEntry::Bde(_)
             | VfsFileEntry::Luksde(_)
+            | VfsFileEntry::Aff(_)
             | VfsFileEntry::Aff4(_)
             | VfsFileEntry::Ewf(_)
             | VfsFileEntry::ExFat(_)
@@ -481,6 +491,7 @@ impl VfsFileEntry {
             | VfsFileEntry::Apm(_)
             | VfsFileEntry::Bde(_)
             | VfsFileEntry::Luksde(_)
+            | VfsFileEntry::Aff(_)
             | VfsFileEntry::Aff4(_)
             | VfsFileEntry::Ewf(_)
             | VfsFileEntry::ExFat(_)
@@ -522,6 +533,7 @@ impl VfsFileEntry {
             VfsFileEntry::Apm(apm_file_entry) => Some(apm_file_entry.get_name()),
             VfsFileEntry::Bde(bde_file_entry) => Some(bde_file_entry.get_name()),
             VfsFileEntry::Luksde(luks_file_entry) => Some(luks_file_entry.get_name()),
+            VfsFileEntry::Aff(aff_file_entry) => Some(aff_file_entry.get_name()),
             VfsFileEntry::Aff4(aff4_file_entry) => Some(aff4_file_entry.get_name()),
             VfsFileEntry::Ewf(ewf_file_entry) => Some(ewf_file_entry.get_name()),
             VfsFileEntry::ExFat(exfat_file_entry) => {
@@ -579,6 +591,7 @@ impl VfsFileEntry {
             | VfsFileEntry::Apm(_)
             | VfsFileEntry::Bde(_)
             | VfsFileEntry::Luksde(_)
+            | VfsFileEntry::Aff(_)
             | VfsFileEntry::Aff4(_)
             | VfsFileEntry::Ewf(_)
             | VfsFileEntry::ExFat(_)
@@ -617,6 +630,7 @@ impl VfsFileEntry {
             | VfsFileEntry::Apm(_)
             | VfsFileEntry::Bde(_)
             | VfsFileEntry::Luksde(_)
+            | VfsFileEntry::Aff(_)
             | VfsFileEntry::Aff4(_)
             | VfsFileEntry::Ewf(_)
             | VfsFileEntry::ExFat(_)
@@ -656,6 +670,7 @@ impl VfsFileEntry {
             VfsFileEntry::Apm(apm_file_entry) => apm_file_entry.get_size(),
             VfsFileEntry::Bde(bde_file_entry) => bde_file_entry.get_size(),
             VfsFileEntry::Luksde(luks_file_entry) => luks_file_entry.get_size(),
+            VfsFileEntry::Aff(aff_file_entry) => aff_file_entry.get_size(),
             VfsFileEntry::Aff4(aff4_file_entry) => aff4_file_entry.get_size(),
             VfsFileEntry::Ewf(ewf_file_entry) => ewf_file_entry.get_size(),
             VfsFileEntry::ExFat(exfat_file_entry) => exfat_file_entry.get_size(),
@@ -693,6 +708,7 @@ impl VfsFileEntry {
             | VfsFileEntry::Apm(_)
             | VfsFileEntry::Bde(_)
             | VfsFileEntry::Luksde(_)
+            | VfsFileEntry::Aff(_)
             | VfsFileEntry::Aff4(_)
             | VfsFileEntry::Ewf(_)
             | VfsFileEntry::ExFat(_)
@@ -806,6 +822,7 @@ impl VfsFileEntry {
             VfsFileEntry::Apm(_) => VfsType::Apm,
             VfsFileEntry::Bde(_) => VfsType::Bde,
             VfsFileEntry::Luksde(_) => VfsType::Luksde,
+            VfsFileEntry::Aff(_) => VfsType::Aff,
             VfsFileEntry::Aff4(_) => VfsType::Aff4,
             VfsFileEntry::Ewf(_) => VfsType::Ewf,
             VfsFileEntry::ExFat(_) => VfsType::ExFat,
@@ -858,6 +875,10 @@ impl VfsFileEntry {
             VfsFileEntry::Luksde(luks_file_entry) => match luks_file_entry {
                 LuksFileEntry::Root { .. } => 0,
                 LuksFileEntry::UnlockedVolume { .. } => 1,
+            },
+            VfsFileEntry::Aff(aff_file_entry) => match aff_file_entry {
+                AffFileEntry::Layer { .. } => 1,
+                AffFileEntry::Root { .. } => 0,
             },
             VfsFileEntry::Aff4(aff4_file_entry) => match aff4_file_entry {
                 Aff4FileEntry::Root { .. } => 0,
@@ -1011,6 +1032,7 @@ impl VfsFileEntry {
             | VfsFileEntry::Apm(_)
             | VfsFileEntry::Bde(_)
             | VfsFileEntry::Luksde(_)
+            | VfsFileEntry::Aff(_)
             | VfsFileEntry::Aff4(_)
             | VfsFileEntry::Ewf(_)
             | VfsFileEntry::ExFat(_)
@@ -1105,6 +1127,7 @@ impl VfsFileEntry {
             VfsFileEntry::Apm(apm_file_entry) => apm_file_entry.get_data_stream(),
             VfsFileEntry::Bde(bde_file_entry) => bde_file_entry.get_data_stream(),
             VfsFileEntry::Luksde(luks_file_entry) => luks_file_entry.get_data_stream(),
+            VfsFileEntry::Aff(aff_file_entry) => aff_file_entry.get_data_stream(),
             VfsFileEntry::Aff4(aff4_file_entry) => aff4_file_entry.get_data_stream(),
             VfsFileEntry::Ewf(ewf_file_entry) => ewf_file_entry.get_data_stream(),
             VfsFileEntry::ExFat(exfat_file_entry) => exfat_file_entry.get_data_stream(),
@@ -1157,6 +1180,7 @@ impl VfsFileEntry {
             | VfsFileEntry::Apm(_)
             | VfsFileEntry::Bde(_)
             | VfsFileEntry::Luksde(_)
+            | VfsFileEntry::Aff(_)
             | VfsFileEntry::Aff4(_)
             | VfsFileEntry::Ewf(_)
             | VfsFileEntry::ExFat(_)
@@ -1205,6 +1229,7 @@ impl VfsFileEntry {
             | VfsFileEntry::Apm(_)
             | VfsFileEntry::Bde(_)
             | VfsFileEntry::Luksde(_)
+            | VfsFileEntry::Aff(_)
             | VfsFileEntry::Aff4(_)
             | VfsFileEntry::Ewf(_)
             | VfsFileEntry::ExFat(_)
@@ -1294,6 +1319,7 @@ impl VfsFileEntry {
             VfsFileEntry::Apm(apm_file_entry) => apm_file_entry.is_root_file_entry(),
             VfsFileEntry::Bde(bde_file_entry) => bde_file_entry.is_root_file_entry(),
             VfsFileEntry::Luksde(luks_file_entry) => luks_file_entry.is_root_file_entry(),
+            VfsFileEntry::Aff(aff_file_entry) => aff_file_entry.is_root_file_entry(),
             VfsFileEntry::Aff4(aff4_file_entry) => aff4_file_entry.is_root_file_entry(),
             VfsFileEntry::Ewf(ewf_file_entry) => ewf_file_entry.is_root_file_entry(),
             VfsFileEntry::ExFat(exfat_file_entry) => exfat_file_entry.is_root_directory(),
@@ -1339,6 +1365,7 @@ impl ExtendedAttributeIterator for VfsFileEntry {
             | VfsFileEntry::Apm(_)
             | VfsFileEntry::Bde(_)
             | VfsFileEntry::Luksde(_)
+            | VfsFileEntry::Aff(_)
             | VfsFileEntry::Aff4(_)
             | VfsFileEntry::Ewf(_)
             | VfsFileEntry::ExFat(_)
@@ -1390,6 +1417,7 @@ impl ExtendedAttributeIterator for VfsFileEntry {
             | VfsFileEntry::Apm(_)
             | VfsFileEntry::Bde(_)
             | VfsFileEntry::Luksde(_)
+            | VfsFileEntry::Aff(_)
             | VfsFileEntry::Aff4(_)
             | VfsFileEntry::Ewf(_)
             | VfsFileEntry::ExFat(_)
@@ -1468,6 +1496,9 @@ impl FileEntryIterator for VfsFileEntry {
             )),
             VfsFileEntry::Luksde(luks_file_entry) => Ok(VfsFileEntry::Luksde(
                 luks_file_entry.get_sub_file_entry_by_index(sub_file_entry_index)?,
+            )),
+            VfsFileEntry::Aff(aff_file_entry) => Ok(VfsFileEntry::Aff(
+                aff_file_entry.get_sub_file_entry_by_index(sub_file_entry_index)?,
             )),
             VfsFileEntry::Aff4(aff4_file_entry) => Ok(VfsFileEntry::Aff4(
                 aff4_file_entry.get_sub_file_entry_by_index(sub_file_entry_index)?,
@@ -1575,6 +1606,9 @@ impl FileEntryIterator for VfsFileEntry {
             }
             VfsFileEntry::Luksde(luks_file_entry) => {
                 Ok(luks_file_entry.get_number_of_sub_file_entries())
+            }
+            VfsFileEntry::Aff(aff_file_entry) => {
+                Ok(aff_file_entry.get_number_of_sub_file_entries())
             }
             VfsFileEntry::Aff4(aff4_file_entry) => {
                 Ok(aff4_file_entry.get_number_of_sub_file_entries())

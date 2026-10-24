@@ -15,6 +15,7 @@ use std::collections::HashSet;
 
 use keramics_core::{DataStreamReference, ErrorTrace};
 
+use keramics_formats::aff::AffImage;
 use keramics_formats::aff4::Aff4Image;
 use keramics_formats::apfs::{ApfsContainer, ApfsCredential, ApfsVolume};
 use keramics_formats::apm::ApmVolumeSystem;
@@ -40,6 +41,7 @@ use keramics_formats::vmdk::VmdkImage;
 use keramics_formats::volsnap::VolsnapShadowStorage;
 use keramics_formats::{FormatIdentifier, FormatScanner, PartitionIterator, Path};
 
+use crate::aff::AffFileSystem;
 use crate::aff4::Aff4FileSystem;
 use crate::apfs::ApfsContainerFileSystem;
 use crate::bde::BdeFileSystem;
@@ -224,6 +226,7 @@ impl VfsScanner {
     /// Retrieves a VFS type for a format identifier.
     fn get_vfs_type(format_identifier: &FormatIdentifier) -> Option<VfsType> {
         match format_identifier {
+            FormatIdentifier::Aff => Some(VfsType::Aff),
             FormatIdentifier::Aff4 => Some(VfsType::Aff4),
             FormatIdentifier::Apfs => Some(VfsType::ApfsContainer),
             FormatIdentifier::Apm => Some(VfsType::Apm),
@@ -512,7 +515,8 @@ impl VfsScanner {
                     Err(error)
                 }
             },
-            VfsType::Aff4
+            VfsType::Aff
+            | VfsType::Aff4
             | VfsType::Ewf
             | VfsType::SparseBundle
             | VfsType::SparseImage
@@ -1131,6 +1135,30 @@ impl VfsScanner {
         let path: &Path = vfs_location.get_path();
 
         match scan_node.get_type() {
+            VfsType::Aff => {
+                let mut aff_image: AffImage = AffImage::new();
+
+                match AffFileSystem::open_image(&mut aff_image, file_system, path) {
+                    Ok(_) => {}
+                    Err(mut error) => {
+                        keramics_core::error_trace_add_frame!(error, "Unable to open AFF image");
+                        return Err(error);
+                    }
+                }
+                match self.scan_for_storage_media_image_sub_nodes(
+                    scan_options,
+                    vfs_location,
+                    scan_node,
+                    AffFileSystem::PATH_PREFIX,
+                    1,
+                ) {
+                    Ok(_) => {}
+                    Err(mut error) => {
+                        keramics_core::error_trace_add_frame!(error, "Unable to scan AFF image");
+                        return Err(error);
+                    }
+                }
+            }
             VfsType::Aff4 => {
                 let mut aff4_image: Aff4Image = Aff4Image::new();
 
@@ -1986,6 +2014,41 @@ mod tests {
         let scan_node: &VfsScanNode = scan_node.sub_nodes.get(0).unwrap();
         let vfs_type: &VfsType = scan_node.get_type();
         assert_eq!(vfs_type, &VfsType::Gpt);
+        assert_eq!(scan_node.sub_nodes.len(), 1);
+
+        let scan_node: &VfsScanNode = scan_node.sub_nodes.get(0).unwrap();
+        let vfs_type: &VfsType = scan_node.get_type();
+        assert_eq!(vfs_type, &VfsType::Ext);
+        assert_eq!(scan_node.sub_nodes.len(), 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_scan_with_aff() -> Result<(), ErrorTrace> {
+        let format_scanner: VfsScanner = get_format_scanner()?;
+
+        let mut scan_options: VfsScanOptions = VfsScanOptions::new();
+        scan_options.parse_partitions("1")?;
+
+        let mut scan_context: VfsScanContext = VfsScanContext::new();
+        let path_string: String = get_test_data_path("aff/ext2.AFF");
+        let vfs_location: VfsLocation = VfsLocation::from(&path_string);
+        format_scanner.scan(&scan_options, &mut scan_context, &vfs_location)?;
+
+        let scan_node: &VfsScanNode = scan_context.root_node.as_ref().unwrap();
+        let vfs_type: &VfsType = scan_node.get_type();
+        assert_eq!(vfs_type, &VfsType::Os);
+        assert_eq!(scan_node.sub_nodes.len(), 1);
+
+        let scan_node: &VfsScanNode = scan_node.sub_nodes.get(0).unwrap();
+        let vfs_type: &VfsType = scan_node.get_type();
+        assert_eq!(vfs_type, &VfsType::Aff);
+        assert_eq!(scan_node.sub_nodes.len(), 1);
+
+        let scan_node: &VfsScanNode = scan_node.sub_nodes.get(0).unwrap();
+        let vfs_type: &VfsType = scan_node.get_type();
+        assert_eq!(vfs_type, &VfsType::Aff);
         assert_eq!(scan_node.sub_nodes.len(), 1);
 
         let scan_node: &VfsScanNode = scan_node.sub_nodes.get(0).unwrap();

@@ -49,6 +49,9 @@ impl VfsPartitionSystem for MbrVolumeSystem {
             }
         };
         let result: Result<Option<u32>, ErrorTrace> = match file_system.as_ref() {
+            VfsFileSystem::Aff(aff_file_system) => {
+                Ok(Some(aff_file_system.get_bytes_per_sector()?))
+            }
             VfsFileSystem::Ewf(ewf_file_system) => {
                 Ok(Some(ewf_file_system.get_bytes_per_sector()?))
             }

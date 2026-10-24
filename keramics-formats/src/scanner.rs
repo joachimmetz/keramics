@@ -68,11 +68,10 @@ impl FormatScanner {
 
     /// Adds Advanced Forensic Format 4 (AFF4) signatures.
     pub fn add_aff4_signatures(&mut self) {
-        // An AFF4 volume is a Zip (ZIP) archive in which the first entry is the
-        // "container.description" container, whose name directly follows the
-        // local file header at a fixed offset.
+        // An AFF4 volume is a ZIP archive in which the first entry is the "container.description"
+        // container, whose name directly follows the local file header at a fixed offset.
         self.signature_scanner.add_signature(Signature::new(
-            "aff41",
+            "aff4.1",
             PatternType::BoundToStart,
             30,
             b"container.description",
@@ -535,7 +534,7 @@ impl FormatScanner {
         for signature in scan_context.results.values() {
             let format_identifier: FormatIdentifier = match signature.identifier.as_str() {
                 "aff1" => FormatIdentifier::Aff,
-                "aff41" => FormatIdentifier::Aff4,
+                "aff4.1" => FormatIdentifier::Aff4,
                 "apfs1" => FormatIdentifier::Apfs,
                 "apm1" | "apm2" => FormatIdentifier::Apm,
                 "bde1" | "bde2" | "bde3" | "bde4" => FormatIdentifier::Bde,
