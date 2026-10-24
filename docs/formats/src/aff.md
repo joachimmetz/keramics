@@ -23,6 +23,8 @@ AFF comes in multiple format versions:
   single-file (.aff), segmented image directory splits (.afd), and independent raw
   bitstream-metadata split pairings (.afm), changes in metadata taxonomy.
 
+> Note that bzip2 compression was never implemented in the AFFLIBv3 reference implementation.
+
 ## Overview
 
 An AFF file consists of:
@@ -62,8 +64,8 @@ An AFF file starts with an 8 byte file header, which contains:
 | --- | --- | --- | --- |
 | 0 | 8 | "AFF10\r\n\000" | Signature |
 
-A file that contains this signature at offset 0 is identified as an AFF file. A zero length file
-with the extension ".aff" is also considered to be an AFF file.
+A file that contains this signature at offset 0 is identified as an AFF file. An empty file with
+the extension ".aff" is also considered to be an AFF file.
 
 ## Segment
 
@@ -205,18 +207,15 @@ The flag in the segment header of a page consists of the following bits:
 
 The compression algorithm is one of:
 
-| Value | Description |
-| --- | --- |
-| 0x0000 | [zlib compressed data](zlib.md) |
-| 0x0010 | bzip2 compressed data |
-| 0x0020 | [LZMA compressed data](#lzma) |
-| 0x0030 | [Zero page](#zero_page) |
+| Value | Identifier | Description |
+| --- | --- | --- |
+| 0x0000 | AF_PAGE_COMP_ALG_ZLIB | [zlib compressed data](zlib.md) |
+| 0x0010 | AF_PAGE_COMP_ALG_BZIP | Reserved for bzip2 compressed data, but never implemented |
+| 0x0020 | AF_PAGE_COMP_ALG_LZMA | [LZMA compressed data](#lzma) |
+| 0x0030 | AF_PAGE_COMP_ALG_ZERO | [Zero page](#zero_page) |
 
 Where a page cannot be compressed, or the compressed data is not smaller than the page data, the
 page is stored uncompressed, and the flag is set to the value 0x0000.
-
-> Note the AFF 1.0 specification uses zlib compression only; the other compression algorithms are
-> extensions of the format.
 
 ### Zero page {#zero_page}
 

@@ -10,6 +10,7 @@ Supported decompression methods:
 * Bzip2 decompression
 * DEFLATE decompression
 * LZFSE decompression
+* LZMA decompression
 * LZNT1 decompression
 * LZXPRESS (LZ77 + DIRECT2) and LZXPRESS Huffman decompression
 * LZX decompression

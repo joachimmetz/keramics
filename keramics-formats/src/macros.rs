@@ -49,6 +49,25 @@ macro_rules! deflate_decompress {
     }};
 }
 
+/// Decompresses LZMA compressed data.
+#[macro_export]
+macro_rules! lzma_decompress {
+    ( $compressed:expr, $uncompressed:expr, $error_message:expr $(,)? ) => {{
+        use keramics_compression::LzmaContext;
+
+        let mut lzma_context: LzmaContext = LzmaContext::new();
+
+        match lzma_context.decompress($compressed, $uncompressed) {
+            Ok(_) => {}
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, $error_message);
+                return Err(error);
+            }
+        }
+        lzma_context.uncompressed_data_size
+    }};
+}
+
 /// Decompresses zlib compressed data.
 #[macro_export]
 macro_rules! zlib_decompress {

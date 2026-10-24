@@ -117,13 +117,29 @@ impl AffBlockReader {
 
                 Ok(page)
             }
-            AFF_PAGE_COMPRESSION_ALGORITHM_BZIP2
-            | AFF_PAGE_COMPRESSION_ALGORITHM_LZMA
-            | AFF_PAGE_COMPRESSION_ALGORITHM_ZERO => Err(keramics_core::error_trace_new!(format!(
-                "Unsupported page compression algorithm: 0x{:04x} of segment: {}",
-                compression_algorithm,
-                segment.get_name()
-            ))),
+            AFF_PAGE_COMPRESSION_ALGORITHM_LZMA => {
+                let compressed_data: Vec<u8> = self.file.get_segment_data(segment.get_name())?;
+                let mut page: Vec<u8> = vec![0; page_size];
+
+                let uncompressed_data_size: usize = crate::lzma_decompress!(
+                    compressed_data.as_slice(),
+                    &mut page,
+                    format!(
+                        "Unable to decompress page data of segment: {}",
+                        segment.get_name()
+                    )
+                );
+                page.truncate(uncompressed_data_size);
+
+                Ok(page)
+            }
+            AFF_PAGE_COMPRESSION_ALGORITHM_BZIP2 | AFF_PAGE_COMPRESSION_ALGORITHM_ZERO => {
+                Err(keramics_core::error_trace_new!(format!(
+                    "Unsupported page compression algorithm: 0x{:04x} of segment: {}",
+                    compression_algorithm,
+                    segment.get_name()
+                )))
+            }
             _ => Err(keramics_core::error_trace_new!(format!(
                 "Unknown page compression algorithm: 0x{:04x} of segment: {}",
                 compression_algorithm,
@@ -288,6 +304,34 @@ mod tests {
 
         assert_eq!(read_size, raw_image_data.len());
         assert_eq!(data, raw_image_data);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_data_from_blocks_with_lzma_data() -> Result<(), ErrorTrace> {
+        let mut reader: AffBlockReader = get_block_reader("ext2_lzma.AFF")?;
+        let raw_image_data: Vec<u8> = get_raw_image_data()?;
+
+        let mut data: Vec<u8> = vec![0; raw_image_data.len()];
+        let read_size: usize = reader.read_data_from_blocks(&mut data, 0)?;
+
+        assert_eq!(read_size, raw_image_data.len());
+        assert_eq!(data, raw_image_data);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_data_from_blocks_with_lzma_data_and_partial_read() -> Result<(), ErrorTrace> {
+        let mut reader: AffBlockReader = get_block_reader("ext2_lzma.AFF")?;
+        let raw_image_data: Vec<u8> = get_raw_image_data()?;
+
+        let mut data: Vec<u8> = vec![0; 512];
+        let read_size: usize = reader.read_data_from_blocks(&mut data, 512)?;
+
+        assert_eq!(read_size, 512);
+        assert_eq!(data, raw_image_data[512..1024]);
 
         Ok(())
     }

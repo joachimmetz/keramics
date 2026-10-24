@@ -31,6 +31,17 @@ then
     # an internal virtual routing map, and therefor not reliably handles relative output paths in
     # sub directories.
     aff4imager -t --relative -i "${BASE_IMAGE_FILE}" -o "${PWD}/test_data/aff4/ext2.aff4"
+
+    # Create an AFF4 volume with two images, an ext2 and an ext3 file system.
+    aff4imager -t --relative -i "${BASE_IMAGE_FILE}" -i test_data/ext/ext3.raw -o "${PWD}/test_data/aff4/ext2_multi.aff4"
+
+    # Create a split AFF4 container, with chunked (BEVY) based image storage, from an
+    # incompressible 12 MiB source.
+    # Note that keramics does not support split AFF4 containers, nor BEVY based image storage.
+    SPLIT_SOURCE_IMAGE_FILE="/tmp/keramics_aff4_split.raw"
+    dd if=/dev/urandom of="${SPLIT_SOURCE_IMAGE_FILE}" bs=1M count=12 2> /dev/null
+    aff4imager -t --relative -i "${SPLIT_SOURCE_IMAGE_FILE}" -o "${PWD}/test_data/aff4/split.aff4" -s 4M
+    rm -f "${SPLIT_SOURCE_IMAGE_FILE}"
 fi
 
 exit ${EXIT_SUCCESS}
