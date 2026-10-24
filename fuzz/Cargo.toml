@@ -24,6 +24,20 @@ doc = false
 required-features = ["fuzzing"]
 
 [[bin]]
+name = "aff"
+path = "fuzz_targets/aff.rs"
+test = false
+doc = false
+required-features = ["fuzzing"]
+
+[[bin]]
+name = "aff4"
+path = "fuzz_targets/aff4.rs"
+test = false
+doc = false
+required-features = ["fuzzing"]
+
+[[bin]]
 name = "apfs"
 path = "fuzz_targets/apfs.rs"
 test = false
@@ -292,6 +306,13 @@ required-features = ["fuzzing"]
 [[bin]]
 name = "xfs"
 path = "fuzz_targets/xfs.rs"
+test = false
+doc = false
+required-features = ["fuzzing"]
+
+[[bin]]
+name = "zip"
+path = "fuzz_targets/zip.rs"
 test = false
 doc = false
 required-features = ["fuzzing"]
