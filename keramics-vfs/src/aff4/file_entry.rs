@@ -74,7 +74,7 @@ impl Aff4FileEntry {
         match self {
             Aff4FileEntry::Root { .. } => PathComponent::Root,
             Aff4FileEntry::Stream { name_index, .. } => {
-                PathComponent::from(format!("aff4{}", name_index + 1))
+                PathComponent::from(format!("aff4.s{}", name_index + 1))
             }
         }
     }
@@ -216,7 +216,7 @@ mod tests {
         let file_entry: Aff4FileEntry = get_stream_file_entry(&test_image, 0);
 
         let name: PathComponent = file_entry.get_name();
-        assert_eq!(name, PathComponent::from("aff41"));
+        assert_eq!(name, PathComponent::from("aff4.s1"));
 
         Ok(())
     }
@@ -264,7 +264,7 @@ mod tests {
         let sub_file_entry: Aff4FileEntry = file_entry.get_sub_file_entry_by_index(0)?;
 
         let name: PathComponent = sub_file_entry.get_name();
-        assert_eq!(name, PathComponent::from("aff41"));
+        assert_eq!(name, PathComponent::from("aff4.s1"));
 
         let result: Result<Aff4FileEntry, ErrorTrace> = file_entry.get_sub_file_entry_by_index(99);
         assert!(result.is_err());

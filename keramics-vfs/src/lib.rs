@@ -31,6 +31,7 @@ mod traits;
 mod types;
 
 // Format specific back-ends.
+mod aff;
 mod aff4;
 mod apfs;
 mod apm;
