@@ -51,8 +51,8 @@ describes the disk-representation layer and the binary format of the data-storag
 | Characteristics | Description |
 | --- | --- |
 | Byte order | big-endian |
-| Sector size | 512 bytes by default, can be set per file |
-| Segment name size | up to 64 bytes |
+| Date and time values | TBD |
+| Character strings | TBD |
 
 The default page size is 16 MiB (16777216 bytes).
 
