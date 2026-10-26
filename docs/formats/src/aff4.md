@@ -1,41 +1,37 @@
 # Advanced Forensic Format 4 (AFF4)
 
-AFF4 is a next-generation forensic container format supporting features such as:
+The Advanced Forensic Format 4 (AFF4) is the successor of the
+[Advanced Forensic Format (AFF)](aff.md).
+
+> Note the term "AFF4" is also used by the AFFLIBv3 project for an early, experimental container
+> implementation based on RDF data types, which predates the stand-alone AFF4 format.
+
+The AFF4 format supports:
 
 * storage virtualisation
 * arbitrary metadata storage
 * extensible compression and hashing schemes
 * throughput scalable to high IO rates
 
-This description of the format is based on the "AFF4 Standard v1.0" specification (March 2017)
-authored by Bradley L Schatz and Michael I Cohen, see
-[AFF4StandardSpecification-v1.0.pdf](https://github.com/aff4/Standard).
-
-<!-- rumdl-disable MD028 -->
-
 > Note where there is ambiguity or difference between the specification and the AFF4 Canonical
 > Reference Images v1.0 (available via <https://github.com/aff4/>), the reference images take
 > precedence.
 
-> Note the "AFF4" name is also used by the AFFLIB project (author of the
-> [AFF](aff.md) format) for an early, experimental container implementation based on RDF data
-> types, which predates this standard. This document describes the AFF4 Standard v1.0.
+In AFF4, disk images are stored in a "Container", which generally is a single ZIP64 based file or a
+folder. Arbitrary metadata is stored using an RDF data model within the container, in a file called
+`information.turtle`.
 
-<!-- rumdl-enable MD028 -->
-
-In the AFF4, forensic images are stored in a "Container", which generally is a single ZIP64 based
-file or a folder. Arbitrary metadata is stored using an RDF data model within the container, in a
-file called `information.turtle`. Image content is stored using two abstractions, the **Map** (a
-virtual address space) and the **Image Stream** (a seekable, contiguous sequence of fixed sized
-data blocks, optionally compressed). Various **Virtual Streams** exist for representing common
-block sequences such as sparse (all 0x00) streams.
+Image content is stored using two abstractions, the **Map** (a virtual address space) and the
+**Image Stream** (a seekable, contiguous sequence of fixed sized data blocks, optionally
+compressed). Various **Virtual Streams** exist for representing common block sequences such as
+sparse (all 0x00) streams.
 
 ## Overview
 
 An AFF4 container consists of:
 
 * one or more **segments** (file like objects) stored within a folder hierarchy, provided by the
-  **storage layer** (a ZIP64 file, or a directory)
+  **storage layer** (a ZIP64 file or a directory)
 * a container **version** file (`version.txt`)
 * an RDF **information model** file (`information.turtle`)
 * one or more **image streams**, for storing the image data
@@ -46,19 +42,17 @@ An AFF4 container consists of:
 
 | Characteristics | Description |
 | --- | --- |
-| Container | A single [Zip (ZIP)](zip.md) file (ZIP64), or a directory |
-| Metadata | RDF data model (Turtle), stored in `information.turtle` |
-| Metadata namespace | `http://aff4.org/Schema#` |
-| Standard version | major 1, minor 0 |
-| Byte order | Not specified |
+| Byte order | TBD (dependent on ZIP64 and other formats used) |
+| Date and time values | TBD (dependent on ZIP64 and other formats used) |
+| Character strings | TBD (dependent on ZIP64 and other formats used) |
 
 ## Container version
 
 The container version is stored in a text file located at the root of the container with the name
-`version.txt`. The file contains name value pairs, separated by an `=` sign. Line endings can be
-CRLF, CR or LF. The ordering of the name value pairs is arbitrary.
+`version.txt`. The file contains name value pairs, separated by an equal (`=`) sign. Line endings
+can be CRLF, CR or LF. The ordering of the name value pairs is arbitrary.
 
-A `version.txt` file in an AFF4 container compliant with AFF4 Standard v1.0 looks like:
+A `version.txt` file in an AFF4 container compliant with AFF4 1.0 looks like:
 
 ```text
 major=1
@@ -66,8 +60,8 @@ minor=0
 tool=libaff4 0.9
 ```
 
-For AFF4 Standard v1.0, major is 1 and minor is 0. The `tool` line is vendor specific, to
-indicate the producing tool.
+For AFF4 1.0, `major` is 1 and `minor` is 0. The `tool` line is vendor specific, to indicate the
+producing tool.
 
 The primary purpose of the `version.txt` file is for bootstrapping and enabling support for
 backwards incompatible changes in the future. Implementations should only encode in the file
@@ -76,13 +70,13 @@ information that would be used to detect non-standard deviations from the AFF4 s
 ## Storage layer {#storage_layer}
 
 AFF4 defines an abstract model of storage layers. Currently the standard has two implementations
-of this abstraction: **Zip** and **Directory** (folder based). The storage layer stores
-**segments** (file like objects), in a folder hierarchy.
+of this abstraction: **ZIP** and **Directory**. The storage layer stores **segments** (file like
+objects), in a folder hierarchy.
 
-Both the Zip and the Directory storage layers provide:
+Both the ZIP and the Directory storage layers provide:
 
 * the root of the volume (the "Context Root" for the volume). For Directory Volumes this is the
-  root folder, for Zip Volumes this is the root of the Zip
+  root folder, for ZIP Volumes this is the root of the ZIP
 * a unique AFF4 GUID based URI (the **Volume URI**), which implicitly maps to the defined Context
   Root
 
@@ -90,20 +84,19 @@ Objects in the information model may represent or refer to objects in the storag
 direct segments, or via the **Map** and **ImageStream** abstractions. The mapping between these
 objects and the segments is defined by the [URI to path mapping](#uri_to_path_mapping) rules.
 
-### Zip container
+### ZIP container
 
-The Zip container is a [Zip (ZIP)](zip.md) archive. The following AFF4 specific requirements
-apply to the Zip container:
+The ZIP container is a [ZIP archive](zip.md) with the following AFF4 specific requirements:
 
-* All Zip headers MUST be zip64, see [ZIP64 records](zip.md#zip64_eocd_record)
-* The Volume URI MUST be stored within the Zip container, in one of the following two locations:
-  * **Zip Comment**: the Volume URI is stored starting at offset 0 of the [ZIP file
-    comment](zip.md#eocd_record)
-  * **container.description**: the Volume URI is stored within a Zip segment named
+* All ZIP headers MUST be zip64, see [ZIP64 records](zip.md#zip64_eocd_record)
+* The Volume URI MUST be stored within the ZIP container, in one of the following two locations:
+  * **ZIP Comment**: the Volume URI is stored starting at offset 0 of the
+    [ZIP file comment](zip.md#eocd_record)
+  * **container.description**: the Volume URI is stored within a ZIP segment named
     `container.description`, in the root of the container
 * A producer SHOULD store the Volume URI in both locations
-* Where a Zip Container stores the Volume URI in a `container.description` segment, the file MUST
-  be the first file stored in the Zip volume
+* Where a ZIP Container stores the Volume URI in a `container.description` segment, the file MUST
+  be the first file stored in the ZIP volume
 
 ## Information model
 
@@ -210,19 +203,11 @@ else
 
 When compression is used within the `ImageStream`, the `aff4:compressionMethod` property MUST be
 set to a resource identifying the compression algorithm. When no `aff4:compressionMethod` is set,
-it is assumed that chunks are stored (uncompressed).
+it is assumed that chunks are stored (uncompressed). Known used compression methods are:
 
-| Compression method | Resource value |
-| --- | --- |
-| LZ4 | <https://code.google.com/p/lz4/> |
-| Deflate | <https://tools.ietf.org/html/rfc1951> |
-| Snappy | <http://code.google.com/p/snappy/> |
-
-> Note that the resource values used to refer to concepts such as hashes or compression
-> algorithms do not necessarily need to resolve to actual content. For example, when AFF4 first
-> implemented Snappy based compression the resource value was the main site for accessing its
-> source code, but the project has since moved to a different repository. The original URL is
-> retained for consistency and backward compatibility.
+* [DEFLATE](zlib.md#deflate_compressed_data)
+* [LZ4](https://github.com/lz4/lz4)
+* [Snappy](https://github.com/google/snappy)
 
 ### Information model
 
@@ -251,15 +236,15 @@ the `aff4:mapGapDefaultStream` property of the `Map` object. If the map is disco
 
 ### Target index {#target_index}
 
-The target index is a text file containing URIs corresponding to target IDs. The file format is
-line based, separated by newline (0x0a) characters. The first line corresponds to target ID 0, the
-second line to target ID 1 and so on.
+The target index is a text file containing URIs corresponding to target identifiers. The file
+format is line based, separated by newline (0x0a) characters. The first line corresponds to target
+identifier 0, the second line to target identifier 1 and so on.
 
 ### Naming
 
 The map is stored under the container root, with the path `URI/map`, where `URI` is the map URI
-encoded per the [storage layer](#storage_layer) description. The target IDs are stored in the file
-`URI/idx`.
+encoded per the [storage layer](#storage_layer) description. The target identifiers are stored in
+the file `URI/idx`.
 
 ### Information model
 
@@ -308,7 +293,7 @@ Any AFF4 URI is mapped into the volume (the storage layer) as follows:
 
 1. The URI prefix component containing "://" is URL encoded
 2. Escaping MUST use upper case
-3. Within the rest of the URI, "/" maps to the local filesystem/Zip container folder separator
+3. Within the rest of the URI, "/" maps to the local filesystem/ZIP container folder separator
 4. Data streams are only stored in paths that have no children
 5. Folder/file names within the URI are URL encoded
 
@@ -491,7 +476,7 @@ specification:
 | File | Description |
 | --- | --- |
 | `aff4://a2e14833-6020-44df-ba5e-3b224e102eb6` | ZIP comment (Volume URI) |
-| `container.description` | Volume URI (first file stored within the Zip) |
+| `container.description` | Volume URI (first file stored within the ZIP) |
 | `version.txt` | Container version |
 | `aff4%3A%2F%2Fdac3f96d-8f2c-4116-adc3-e870fd009242/00000000` | Image stream chunk storage (bevvy) segment |
 | `aff4%3A%2F%2Fdac3f96d-8f2c-4116-adc3-e870fd009242/00000000.index` | Image stream index segment |
@@ -542,14 +527,6 @@ The contents of `information.turtle`:
 
 <!-- rumdl-disable MD013 -->
 
-* [AFF4 standard, GitHub repository (including the specification and the canonical reference
-  images 1.0)](https://github.com/aff4/Standard)
 * [AFF4StandardSpecification-v1.0.pdf](https://github.com/aff4/Standard/blob/master/AFF4StandardSpecification-v1.0.pdf)
-* [Cohen, Garfinkel, Schatz (2009) "Extending the Advanced Forensic Format to Accommodate
-  Multiple Data Sources, Logical Evidence, Arbitrary Information and Forensic
-  Workflow"](http://dfrws.org/conferences/dfrws-usa-2009/sessions/extending-advanced-forensic-format-accommodate-multiple-data)
-* [Cohen & Schatz (2010) "Hash based disk imaging using AFF4"](http://dfrws.org/conferences/dfrws-usa-2010/sessions/hash-based-disk-imaging-using-aff4)
-* [Schatz (2015) "Wirespeed: Extending The AFF4 Container Format For Scalable Acquisition And
-  Live Analysis"](http://dfrws.org/conferences/dfrws-usa-2015/sessions/wirespeed-extending-aff4-container-format-scalable-acquisition)
 
 <!-- rumdl-enable MD013 -->

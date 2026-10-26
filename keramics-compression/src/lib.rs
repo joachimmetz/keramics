@@ -22,6 +22,7 @@ mod lzvn;
 mod lzx;
 mod lzxpress;
 mod traits;
+mod xz;
 mod zlib;
 
 pub use adc::AdcContext;
@@ -33,4 +34,5 @@ pub use lznt1::Lznt1Context;
 pub use lzvn::LzvnContext;
 pub use lzx::LzxContext;
 pub use lzxpress::{LzxpressContext, LzxpressHuffmanContext};
+pub use xz::XzContext;
 pub use zlib::ZlibContext;

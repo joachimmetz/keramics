@@ -237,16 +237,16 @@ IsMatch[state, posState]
 The decoder keeps a history of the 4 latest match distances (rep0 to rep3), containing zero-based
 distances, initialized to zero. The distance history is updated depending on the type of match:
 
-- Simple Match:
-      `rep3 = rep2; rep2 = rep1; rep1 = rep0; rep0 = distance`
-- Rep Match 0 or Short Rep Match:
-      no update
-- Rep Match 1:
-      `dist = rep1; rep1 = rep0; rep0 = dist`
-- Rep Match 2:
-      `dist = rep2; rep2 = rep1; rep1 = rep0; rep0 = dist`
-- Rep Match 3:
-      `dist = rep3; rep3 = rep2; rep2 = rep1; rep1 = rep0; rep0 = dist`
+* Simple Match:
+  `rep3 = rep2; rep2 = rep1; rep1 = rep0; rep0 = distance`
+* Rep Match 0 or Short Rep Match:
+  no update
+* Rep Match 1:
+  `dist = rep1; rep1 = rep0; rep0 = dist`
+* Rep Match 2:
+  `dist = rep2; rep2 = rep1; rep1 = rep0; rep0 = dist`
+* Rep Match 3:
+  `dist = rep3; rep3 = rep2; rep2 = rep1; rep1 = rep0; rep0 = dist`
 
 ### Literal
 
@@ -314,11 +314,11 @@ larger than the number of already decoded bytes.
 There are two types of length decoders, one for simple matches and one for rep matches. Each
 length decoder consists of:
 
-- a choice bit (low length vs higher length)
-- a low length decoder, a 3-bit bit tree (8 values) per position state
-- a second choice bit (mid length vs high length)
-- a mid length decoder, a 3-bit bit tree (8 values) per position state
-- a high length decoder, an 8-bit bit tree (256 values)
+* a choice bit (low length vs higher length)
+* a low length decoder, a 3-bit bit tree (8 values) per position state
+* a second choice bit (mid length vs high length)
+* a mid length decoder, a 3-bit bit tree (8 values) per position state
+* a high length decoder, an 8-bit bit tree (256 values)
 
 The decoded match length (one-based) is:
 

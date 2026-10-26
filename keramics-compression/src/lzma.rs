@@ -19,6 +19,11 @@
 //! LZMA-alone): a 13-byte stream header consisting of the properties byte,
 //! the 32-bit little-endian dictionary size and the 64-bit little-endian
 //! uncompressed data size, followed by the range-coded LZMA bitstream.
+//!
+//! The low-level `LzmaDecoder` also supports decompressing a single
+//! range-coded LZMA stream chunk, i.e. a stream of a known size that ends
+//! when the range coder is exhausted and does not use an end of payload
+//! marker (EOPM). This is used by container formats such as XZ (LZMA2).
 
 use keramics_core::{DebugTrace, DebugTraceScope, ErrorTrace};
 use keramics_layout_map::LayoutMap;
@@ -369,11 +374,29 @@ impl LzmaContext {
                 "Invalid uncompressed data value too small"
             ));
         }
-        let mut decoder: LzmaDecoder = LzmaDecoder::new(&stream_header);
+        let mut decoder: LzmaDecoder = LzmaDecoder::new(
+            stream_header.literal_context_bits,
+            stream_header.literal_pos_bits,
+            stream_header.pos_bits,
+        )?;
+        let target_size: usize =
+            if stream_header.uncompressed_data_size == LZMA_UNCOMPRESSED_SIZE_UNKNOWN {
+                usize::MAX
+            } else {
+                stream_header.uncompressed_data_size as usize
+            };
         let compressed_stream: &[u8] = &compressed_data[13..];
 
         DebugTrace::scope(|debug_trace| {
-            match decoder.decompress_stream(debug_trace, compressed_stream, uncompressed_data) {
+            match decoder.decompress_chunk(
+                debug_trace,
+                compressed_stream,
+                uncompressed_data,
+                0,
+                0,
+                target_size,
+                true,
+            ) {
                 Ok(number_of_bytes) => {
                     self.uncompressed_data_size = number_of_bytes;
                 }
@@ -388,7 +411,7 @@ impl LzmaContext {
 }
 
 /// Decoder for decompressing LZMA compressed data.
-struct LzmaDecoder {
+pub(crate) struct LzmaDecoder {
     /// Number of literal context bits (lc).
     literal_context_bits: u8,
 
@@ -397,9 +420,6 @@ struct LzmaDecoder {
 
     /// Number of position bits (pb).
     pos_bits: u8,
-
-    /// Uncompressed data size, or LZMA_UNCOMPRESSED_SIZE_UNKNOWN.
-    uncompressed_data_size: u64,
 
     /// Decoder state (0 to 11).
     state: usize,
@@ -462,15 +482,36 @@ struct LzmaDecoder {
 
 impl LzmaDecoder {
     /// Creates a new decoder.
-    pub fn new(stream_header: &LzmaStreamHeader) -> LzmaDecoder {
-        let number_of_literal_states: usize =
-            1 << (stream_header.literal_context_bits + stream_header.literal_pos_bits);
+    pub fn new(
+        literal_context_bits: u8,
+        literal_pos_bits: u8,
+        pos_bits: u8,
+    ) -> Result<Self, ErrorTrace> {
+        let decoder: LzmaDecoder = Self::create(literal_context_bits, literal_pos_bits, pos_bits)?;
 
-        Self {
-            literal_context_bits: stream_header.literal_context_bits,
-            literal_pos_bits: stream_header.literal_pos_bits,
-            pos_bits: stream_header.pos_bits,
-            uncompressed_data_size: stream_header.uncompressed_data_size,
+        Ok(decoder)
+    }
+
+    /// Creates a new decoder with the specified properties.
+    fn create(
+        literal_context_bits: u8,
+        literal_pos_bits: u8,
+        pos_bits: u8,
+    ) -> Result<Self, ErrorTrace> {
+        if u32::from(literal_context_bits) + u32::from(literal_pos_bits) > 4
+            || u32::from(pos_bits) > 4
+        {
+            return Err(keramics_core::error_trace_new!(format!(
+                "Unsupported LZMA properties value: lc: {}, lp: {}, pb: {}",
+                literal_context_bits, literal_pos_bits, pos_bits
+            )));
+        }
+        let number_of_literal_states: usize = 1 << (literal_context_bits + literal_pos_bits);
+
+        Ok(Self {
+            literal_context_bits: literal_context_bits,
+            literal_pos_bits: literal_pos_bits,
+            pos_bits: pos_bits,
             state: 0,
             rep0: 0,
             rep1: 0,
@@ -494,7 +535,66 @@ impl LzmaDecoder {
             // distance low bits (position special) decoders for slots 4 to 13.
             dist_low: vec![LZMA_PROBABILITY_INIT; 114],
             dist_align: vec![LZMA_PROBABILITY_INIT; 1 << LZMA_NUMBER_OF_DISTANCE_ALIGN_BITS],
+        })
+    }
+
+    /// Resets the decoder state while keeping the current properties.
+    pub fn reset_state(&mut self) {
+        self.state = 0;
+        self.rep0 = 0;
+        self.rep1 = 0;
+        self.rep2 = 0;
+        self.rep3 = 0;
+        self.previous_byte = 0;
+        for probability in self.is_match.iter_mut() {
+            *probability = LZMA_PROBABILITY_INIT;
         }
+        for probability in self.is_rep.iter_mut() {
+            *probability = LZMA_PROBABILITY_INIT;
+        }
+        for probability in self.is_rep0.iter_mut() {
+            *probability = LZMA_PROBABILITY_INIT;
+        }
+        for probability in self.is_rep1.iter_mut() {
+            *probability = LZMA_PROBABILITY_INIT;
+        }
+        for probability in self.is_rep2.iter_mut() {
+            *probability = LZMA_PROBABILITY_INIT;
+        }
+        for probability in self.is_rep0_long.iter_mut() {
+            *probability = LZMA_PROBABILITY_INIT;
+        }
+        for probability in self.literal.iter_mut() {
+            *probability = LZMA_PROBABILITY_INIT;
+        }
+        for probability in self.match_len.iter_mut() {
+            *probability = LZMA_PROBABILITY_INIT;
+        }
+        for probability in self.rep_len.iter_mut() {
+            *probability = LZMA_PROBABILITY_INIT;
+        }
+        for probability in self.dist_slot.iter_mut() {
+            *probability = LZMA_PROBABILITY_INIT;
+        }
+        for probability in self.dist_low.iter_mut() {
+            *probability = LZMA_PROBABILITY_INIT;
+        }
+        for probability in self.dist_align.iter_mut() {
+            *probability = LZMA_PROBABILITY_INIT;
+        }
+    }
+
+    /// Resets the decoder state and changes the properties.
+    pub fn reset_state_and_props(
+        &mut self,
+        literal_context_bits: u8,
+        literal_pos_bits: u8,
+        pos_bits: u8,
+    ) -> Result<(), ErrorTrace> {
+        let decoder: LzmaDecoder = Self::create(literal_context_bits, literal_pos_bits, pos_bits)?;
+        *self = decoder;
+
+        Ok(())
     }
 }
 
@@ -512,39 +612,73 @@ impl LzmaDecoder {
         };
     }
 
-    /// Decompresses an LZMA stream and returns the number of decompressed bytes.
-    fn decompress_stream(
+    /// Decompresses a single LZMA stream chunk.
+    ///
+    /// \param debug_trace - The debug trace scope.
+    /// \param compressed_data - The compressed chunk data including the five-byte range coder initialization.
+    /// \param uncompressed_data - The output buffer.
+    /// \param offset - The first position in the output buffer where the decompressed data is written.
+    /// \param dictionary_start - The first position in the output buffer of the valid dictionary (history) bytes.
+    /// \param target_size - The number of bytes to decompress or usize::MAX if the size is unknown.
+    /// \param allow_eopm - Whether an end of payload marker (EOPM) is allowed to terminate the chunk.
+    pub fn decompress_chunk(
         &mut self,
         debug_trace: &mut DebugTraceScope,
         compressed_data: &[u8],
         uncompressed_data: &mut [u8],
+        offset: usize,
+        dictionary_start: usize,
+        target_size: usize,
+        allow_eopm: bool,
     ) -> Result<usize, ErrorTrace> {
         let mut range_decoder: LzmaRangeDecoder = LzmaRangeDecoder::new(compressed_data)?;
-        let size_defined: bool = self.uncompressed_data_size != LZMA_UNCOMPRESSED_SIZE_UNKNOWN;
-        let size: usize = if size_defined {
-            self.uncompressed_data_size as usize
+        let size_defined: bool = target_size != usize::MAX;
+        let end: usize = if size_defined {
+            let end_position: usize = offset.checked_add(target_size).ok_or_else(|| {
+                keramics_core::error_trace_new!("Invalid uncompressed data value too small")
+            })?;
+
+            if end_position > uncompressed_data.len() {
+                return Err(keramics_core::error_trace_new!(
+                    "Invalid uncompressed data value too small"
+                ));
+            }
+            end_position
         } else {
-            usize::MAX
+            uncompressed_data.len()
         };
         let pos_mask: usize = (1 << self.pos_bits) - 1;
         let literal_pos_mask: usize = (1 << self.literal_pos_bits) - 1;
 
-        // EOPM is always allowed in a standalone (LZMA1) stream with an unknown
-        // uncompressed data size. When the uncompressed data size is known, EOPM
-        // is only allowed if it occurs after exactly that number of bytes.
+        // EOPM is always allowed in a stream with an unknown
+        // uncompressed data size. When the uncompressed data size
+        // is known, EOPM is only allowed after exactly that many
+        // bytes have been decompressed.
         let mut eopm_is_valid: bool = !size_defined;
-        let mut offset: usize = 0;
+        let mut written_offset: usize = offset;
 
         loop {
-            if size_defined && offset >= size {
+            if size_defined && written_offset >= end {
                 range_decoder.normalize()?;
 
                 if range_decoder.is_finished() {
-                    break;
+                    // When EOPM is disallowed, i.e. for an LZMA2 chunk, the
+                    // chunk must have consumed exactly its compressed data.
+                    if !allow_eopm && range_decoder.data_offset != compressed_data.len() {
+                        return Err(keramics_core::error_trace_new!(
+                            "Invalid compressed data value too large"
+                        ));
+                    }
+                    return Ok(written_offset - offset);
+                }
+                if !allow_eopm {
+                    return Err(keramics_core::error_trace_new!(
+                        "Invalid end of chunk, incomplete range coder stream"
+                    ));
                 }
                 eopm_is_valid = true;
             }
-            let pos_state: usize = offset & pos_mask;
+            let pos_state: usize = written_offset & pos_mask;
 
             if lzma_decode_bit(
                 &mut range_decoder,
@@ -552,15 +686,17 @@ impl LzmaDecoder {
             )? == 0
             {
                 // Decode a literal.
-                let subcoder: usize = (((offset & literal_pos_mask) << self.literal_context_bits)
+                let subcoder: usize = (((written_offset & literal_pos_mask)
+                    << self.literal_context_bits)
                     + (self.previous_byte as usize >> (8 - self.literal_context_bits)))
                     * 0x300;
-                let mut match_byte: u8 =
-                    if self.state >= LZMA_NUMBER_OF_LITERAL_STATES && offset > self.rep0 {
-                        uncompressed_data[offset - 1 - self.rep0]
-                    } else {
-                        0
-                    };
+                let mut match_byte: u8 = if self.state >= LZMA_NUMBER_OF_LITERAL_STATES
+                    && written_offset - dictionary_start > self.rep0
+                {
+                    uncompressed_data[written_offset - 1 - self.rep0]
+                } else {
+                    0
+                };
                 let mut matched: bool = self.state >= LZMA_NUMBER_OF_LITERAL_STATES;
                 let mut symbol: usize = 1;
 
@@ -589,19 +725,14 @@ impl LzmaDecoder {
                 }
                 let literal_value: u8 = (symbol & 0xFF) as u8;
 
-                if size_defined && offset >= size {
-                    return Err(keramics_core::error_trace_new!(
-                        "Invalid uncompressed data value too small"
-                    ));
-                }
-                if offset >= uncompressed_data.len() {
+                if written_offset >= end {
                     return Err(keramics_core::error_trace_new!(
                         "Invalid uncompressed data value too small"
                     ));
                 }
                 debug_trace.print_field("symbol", format!("literal: 0x{:02x}", literal_value));
-                uncompressed_data[offset] = literal_value;
-                offset += 1;
+                uncompressed_data[written_offset] = literal_value;
+                written_offset += 1;
                 self.previous_byte = literal_value;
                 self.update_state_literal();
             } else {
@@ -696,7 +827,7 @@ impl LzmaDecoder {
                                 ));
                             }
                             debug_trace.print_field("symbol", String::from("EOPM"));
-                            break;
+                            return Ok(written_offset - offset);
                         }
                         distance = value as usize;
                     }
@@ -704,26 +835,22 @@ impl LzmaDecoder {
                     self.rep2 = self.rep1;
                     self.rep1 = self.rep0;
                     self.rep0 = distance;
-                    if distance >= offset {
+                    if distance >= written_offset - dictionary_start {
                         return Err(keramics_core::error_trace_new!(format!(
                             "Invalid match distance: {} out of bounds",
                             distance
                         )));
                     }
                     for _ in 0..match_length {
-                        if size_defined && offset >= size {
+                        if written_offset >= end {
                             return Err(keramics_core::error_trace_new!(
                                 "Invalid uncompressed data value too small"
                             ));
                         }
-                        if offset >= uncompressed_data.len() {
-                            return Err(keramics_core::error_trace_new!(
-                                "Invalid uncompressed data value too small"
-                            ));
-                        }
-                        uncompressed_data[offset] = uncompressed_data[offset - 1 - distance];
-                        offset += 1;
-                        self.previous_byte = uncompressed_data[offset - 1];
+                        uncompressed_data[written_offset] =
+                            uncompressed_data[written_offset - 1 - distance];
+                        written_offset += 1;
+                        self.previous_byte = uncompressed_data[written_offset - 1];
                     }
                     debug_trace.print_field(
                         "symbol",
@@ -731,7 +858,7 @@ impl LzmaDecoder {
                     );
                 } else {
                     // Repeated match.
-                    if offset == 0 {
+                    if written_offset - dictionary_start == 0 {
                         return Err(keramics_core::error_trace_new!("Invalid match at offset 0"));
                     }
                     let rep_distance: usize;
@@ -750,27 +877,22 @@ impl LzmaDecoder {
                                 11
                             };
                             rep_distance = self.rep0;
-                            if size_defined && offset >= size {
-                                return Err(keramics_core::error_trace_new!(
-                                    "Invalid uncompressed data value too small"
-                                ));
-                            }
-                            if offset >= uncompressed_data.len() {
+                            if written_offset >= end {
                                 return Err(keramics_core::error_trace_new!(
                                     "Invalid uncompressed data value too small"
                                 ));
                             }
                             // NOTE: a short repeated match must be a valid distance.
-                            if rep_distance >= offset {
+                            if rep_distance >= written_offset - dictionary_start {
                                 return Err(keramics_core::error_trace_new!(format!(
                                     "Invalid match distance: {} out of bounds",
                                     rep_distance
                                 )));
                             }
-                            uncompressed_data[offset] =
-                                uncompressed_data[offset - 1 - rep_distance];
-                            offset += 1;
-                            self.previous_byte = uncompressed_data[offset - 1];
+                            uncompressed_data[written_offset] =
+                                uncompressed_data[written_offset - 1 - rep_distance];
+                            written_offset += 1;
+                            self.previous_byte = uncompressed_data[written_offset - 1];
                             debug_trace.print_field(
                                 "symbol",
                                 format!("short rep: distance: {}", rep_distance),
@@ -817,26 +939,22 @@ impl LzmaDecoder {
                     let match_length: usize =
                         lzma_decode_length(&mut range_decoder, pos_state, &mut self.rep_len)?;
                     for _ in 0..match_length {
-                        if size_defined && offset >= size {
-                            return Err(keramics_core::error_trace_new!(
-                                "Invalid uncompressed data value too small"
-                            ));
-                        }
-                        if offset >= uncompressed_data.len() {
+                        if written_offset >= end {
                             return Err(keramics_core::error_trace_new!(
                                 "Invalid uncompressed data value too small"
                             ));
                         }
                         // NOTE: the rep distance must have been a valid distance when it was stored.
-                        if rep_distance >= offset {
+                        if rep_distance >= written_offset - dictionary_start {
                             return Err(keramics_core::error_trace_new!(format!(
                                 "Invalid match distance: {} out of bounds",
                                 rep_distance
                             )));
                         }
-                        uncompressed_data[offset] = uncompressed_data[offset - 1 - rep_distance];
-                        offset += 1;
-                        self.previous_byte = uncompressed_data[offset - 1];
+                        uncompressed_data[written_offset] =
+                            uncompressed_data[written_offset - 1 - rep_distance];
+                        written_offset += 1;
+                        self.previous_byte = uncompressed_data[written_offset - 1];
                     }
                     debug_trace.print_field(
                         "symbol",
@@ -848,7 +966,7 @@ impl LzmaDecoder {
                 }
             }
         }
-        Ok(offset)
+        Ok(written_offset - offset)
     }
 }
 
