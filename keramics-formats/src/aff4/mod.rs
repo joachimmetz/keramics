@@ -17,6 +17,9 @@ pub(crate) mod constants;
 mod file;
 mod image;
 mod information;
+pub(crate) mod standard;
 mod version;
 
 pub use image::Aff4Image;
+pub use standard::Aff4StandardMedia;
+pub use standard::Aff4StandardReader;

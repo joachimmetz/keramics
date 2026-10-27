@@ -44,6 +44,12 @@ pub struct Aff4File {
 
     /// Names of the image entries stored in the volume.
     image_names: Vec<String>,
+
+    /// Information container of the volume.
+    information: Aff4Information,
+
+    /// True if the volume uses the standard AFF4 (for example AFF4 Standard v1.0a) stream and map representation.
+    is_standard: bool,
 }
 
 impl Aff4File {
@@ -56,6 +62,8 @@ impl Aff4File {
             container_description: String::new(),
             volume_uri: String::new(),
             image_names: Vec::new(),
+            information: Aff4Information::new(),
+            is_standard: false,
         }
     }
 
@@ -90,6 +98,19 @@ impl Aff4File {
         self.zip_file = ZipFile::new();
 
         zip_file
+    }
+
+    /// Retrieves the information container and moves it out.
+    pub fn take_information(&mut self) -> Aff4Information {
+        let information: Aff4Information = self.information.clone();
+        self.information = Aff4Information::new();
+
+        information
+    }
+
+    /// Determines if the volume uses the standard AFF4 representation.
+    pub fn is_standard(&self) -> bool {
+        self.is_standard
     }
 
     /// Opens the AFF4 file.
@@ -240,24 +261,36 @@ impl Aff4File {
                 "Missing volume URI in information container"
             ));
         }
-        if information.image_names.is_empty() {
-            return Err(keramics_core::error_trace_new!(
-                "Missing image entry in information container"
-            ));
-        }
-        let image_names: Vec<String> = information
-            .image_names
-            .iter()
-            .filter(|image_name| self.zip_file.get_entry(image_name).is_some())
-            .cloned()
-            .collect();
-        if image_names.is_empty() {
-            return Err(keramics_core::error_trace_new!(
-                "Missing image entry in volume"
-            ));
-        }
-        self.volume_uri = information.volume_uri;
+        let is_standard: bool = information.is_standard();
+        // Standard AFF4 volumes (for example AFF4 Standard v1.0a) store their
+        // image as data stream and map nodes. The node identities are not Zip
+        // entry names and are resolved from the data stream and map nodes,
+        // therefore the image entry names are not validated here.
+        let image_names: Vec<String> = if is_standard {
+            Vec::new()
+        } else {
+            if information.image_names.is_empty() {
+                return Err(keramics_core::error_trace_new!(
+                    "Missing image entry in information container"
+                ));
+            }
+            let image_names: Vec<String> = information
+                .image_names
+                .iter()
+                .filter(|image_name| self.zip_file.get_entry(image_name).is_some())
+                .cloned()
+                .collect();
+            if image_names.is_empty() {
+                return Err(keramics_core::error_trace_new!(
+                    "Missing image entry in volume"
+                ));
+            }
+            image_names
+        };
+        self.volume_uri = information.volume_uri.clone();
         self.image_names = image_names;
+        self.information = information;
+        self.is_standard = is_standard;
 
         Ok(())
     }

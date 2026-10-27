@@ -26,4 +26,17 @@ pub trait FileResolver: Send + Sync {
         &self,
         path_components: &[PathComponent],
     ) -> Result<Option<DataStreamReference>, ErrorTrace>;
+
+    /// Retrieves the names of the files stored in the directory with the specified path.
+    ///
+    /// An empty path refers to the base directory. The default implementation
+    /// returns an empty list; resolvers with access to a directory may
+    /// override this for best effort listing.
+    #[allow(unused_variables)]
+    fn list_file_names(
+        &self,
+        path_components: &[PathComponent],
+    ) -> Result<Vec<String>, ErrorTrace> {
+        Ok(Vec::new())
+    }
 }

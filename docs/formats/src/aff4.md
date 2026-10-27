@@ -42,7 +42,7 @@ An AFF4 container consists of:
 
 | Characteristics | Description |
 | --- | --- |
-| Byte order | TBD (dependent on ZIP64 and other formats used) |
+| Byte order | The specification is silent; the reference images use little-endian binary values, and this implementation reads and writes little-endian |
 | Date and time values | TBD (dependent on ZIP64 and other formats used) |
 | Character strings | TBD (dependent on ZIP64 and other formats used) |
 
@@ -97,6 +97,26 @@ The ZIP container is a [ZIP archive](zip.md) with the following AFF4 specific re
 * A producer SHOULD store the Volume URI in both locations
 * Where a ZIP Container stores the Volume URI in a `container.description` segment, the file MUST
   be the first file stored in the ZIP volume
+
+### Companion volumes
+
+A single logical AFF4 volume MAY be stored in multiple container files. The reference images use
+two configurations for this:
+
+* **Split volumes**: a primary file with one or more companion files named
+  `<primary-file-name>.A01`, `<primary-file-name>.A02`, and so on. The `aff4:stored` property of
+  the `Image` and `ImageStream` objects identifies the volume that stores the metadata and the
+  data. For example, `split.aff4` stores the image data and `split.aff4.A01` stores the image
+  and stream metadata.
+* **Striped volumes**: sibling container files in the same directory, for example
+  `Base-Linear_1.aff4` and `Base-Linear_2.aff4`, where the `aff4:stored` property of an
+  `ImageStream` object references the Volume URI of the companion file that stores the chunk
+  data of that stream.
+
+When the `aff4:stored` property of a `Map` or `ImageStream` object references the primary
+volume (or uses the relative marker `:`), the segments of that object are located in the primary
+file. When it references another volume URI, the segments are located in the companion file with
+that Volume URI.
 
 ## Information model
 
@@ -167,6 +187,12 @@ specification. Reference images use an 8 digit, hexadecimal, zero padded number,
 Bevvy index segments are named with a `.index` extension on the base bevvy name, e.g.
 `00000000.index`.
 
+> Note the specification's reader algorithm derives the stored length of a chunk from the
+> difference of the offset values of consecutive index entries. The reference images do not
+> follow this; they store a 12 byte index entry for each chunk, with an explicit stored size
+> (u32) per chunk, and this implementation follows the reference images. A stored size of 0
+> indicates a chunk consisting only of zero bytes.
+
 ### Compression {#image_stream_compression}
 
 Storage of uncompressed chunks is supported by the simple principle that if
@@ -205,9 +231,12 @@ When compression is used within the `ImageStream`, the `aff4:compressionMethod` 
 set to a resource identifying the compression algorithm. When no `aff4:compressionMethod` is set,
 it is assumed that chunks are stored (uncompressed). Known used compression methods are:
 
-* [DEFLATE](zlib.md#deflate_compressed_data)
+* [DEFLATE](zlib.md#deflate_compressed_data), identified in the reference images by
+  `http://tools.ietf.org/html/rfc1951` (raw DEFLATE) or `https://www.ietf.org/rfc/rfc1950.txt`
+  (zlib, RFC 1950)
 * [LZ4](https://github.com/lz4/lz4)
-* [Snappy](https://github.com/google/snappy)
+* [Snappy](https://github.com/google/snappy), identified in the reference images by
+  `http://code.google.com/p/snappy/`
 
 ### Information model
 
@@ -233,6 +262,15 @@ following structure:
 The `Map` MAY be discontiguous. In that case a default value for holes **MAY** be specified by
 the `aff4:mapGapDefaultStream` property of the `Map` object. If the map is discontiguous, and the
 `aff4:mapGapDefaultStream` property is not set, then `aff4:Zero` is used to fill the holes.
+
+Map entries need not be contiguous, and in a sparse image large portions of the mapped address
+space need not be covered by any map entry at all. Such uncovered regions (holes) are filled with
+the `aff4:mapGapDefaultStream`. For example, in the `Base-ExabyteSparse.aff4` canonical image
+(8 EiB media size), the first 1 MiB and the trailing 1 MiB are covered by
+`aff4:SymbolicStreamFF` map entries, a set of map entries near the end of the 64-bit address
+space cover the `ImageStream` data (with the stream chunks served in an order different from
+their chunk order), a number of regions are covered by explicit `aff4:Zero` map entries, and all
+remaining regions are holes filled with `aff4:Zero`.
 
 ### Target index {#target_index}
 
@@ -279,6 +317,10 @@ example, the 7 byte repeated string "UNKNOWN" will be truncated at the end of th
 * The chunks in `aff4:UnknownData` are filled with the repeated ASCII string "UNKNOWN"
 * The chunks in `aff4:UnreadableData` are filled with the repeated ASCII string
   "UNREADABLEDATA"
+
+> Note this implementation fills regions mapped to `aff4:UnknownData` and
+> `aff4:UnreadableData` with 0x00 bytes, instead of the repeated string streams described by the
+> specification.
 
 ## URI to path mapping {#uri_to_path_mapping}
 
@@ -522,6 +564,46 @@ The contents of `information.turtle`:
      aff4:chunkSize    "32768"^^xsd:int ;
      aff4:compressionMethod <http://tools.ietf.org/html/rfc1951> .
 ```
+
+## Deviations from the specification
+
+Where the specification is silent or differs from the AFF4 Canonical Reference Images v1.0, this
+implementation follows the reference images. The known deviations and resolutions are:
+
+* **Byte order**: the specification does not state the byte order of the binary fields. The
+  reference images use little-endian values, and that is the byte order used here for the bevvy
+  index entries (12 bytes each: u64 offset, u32 stored size) and the map entries (28 bytes each:
+  u64 mapped offset, u64 length, u64 target offset, u32 target ID)
+* **Bevvy index**: the reader algorithm in the specification derives the stored length of a chunk
+  from the difference of consecutive index entries. The reference images store an explicit stored
+  size (u32) in every index entry, which is what this implementation uses. A stored size of 0
+  denotes a chunk consisting only of zero bytes, and is read as such
+* **Compression methods**: the reference images declare the compression method using the IRIs
+  `http://code.google.com/p/snappy/` (Snappy) and `https://www.ietf.org/rfc/rfc1950.txt` (zlib,
+  RFC 1950), while the container example in the specification uses
+  `http://tools.ietf.org/html/rfc1951` (raw DEFLATE, RFC 1951). This implementation supports
+  Snappy, zlib (RFC 1950), and raw DEFLATE (RFC 1951)
+* **Percent encoding of segment names**: the reference images contain segment names in both the
+  fully encoded form (for example `aff4%3A%2F%2F<uuid>/00000000`) and the partially encoded form
+  (for example `file%3A/tmp/keramics_aff4_split.raw/00000000`). Both are accepted, which means
+  that stream URIs are matched by identity after removing the `aff4://` scheme, so that a stream
+  referenced by `<volume-URI>/file:/tmp/data.raw` and by `file:/tmp/data.raw` is the same stream
+* **Block hash segment names**: the reference images name block hash segments with a
+  `blockHash.` infix (for example `00000000.blockHash.md5`), while the specification names them
+  without it (for example `00000000.md5`)
+* **Unknown and unreadable data**: this implementation fills regions mapped to
+  `aff4:UnknownData` or `aff4:UnreadableData` with 0x00 bytes, instead of the repeated string
+  streams described by the specification
+* **`aff4:imageStreamHash`**: in the reference images this value does not match the SHA-512 of
+  the decoded stream data (for example in `Base-Linear.aff4` the declared value is
+  `7c909ad4...0db3`, while SHA-512 over the 3,964,928 decoded stream bytes is
+  `647e8757...b5d5`). This implementation does not verify stream or block hashes
+* **Hash verification**: hash properties on the `Image` node (for example
+  `aff4:blockMapHash`) are not verified by this implementation
+
+Pre-standard AFF4 test images (for example `Base-Linear.af4` from the pre-standard AFF4 test
+suite) do not contain the standard RDF information model (no `Image`, `Map`, and `ImageStream`
+nodes), and are not covered by the AFF4 Standard reader.
 
 ## References {#references}
 
