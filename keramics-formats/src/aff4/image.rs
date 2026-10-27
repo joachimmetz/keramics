@@ -23,6 +23,7 @@ use super::block_reader::Aff4BlockReader;
 use super::block_stream::Aff4BlockStream;
 use super::constants::*;
 use super::file::Aff4File;
+use super::standard::{Aff4StandardBlockStream, Aff4StandardMedia, Aff4StandardReader};
 
 /// Advanced Forensic Format 4 (AFF4) image.
 pub struct Aff4Image {
@@ -58,6 +59,13 @@ pub struct Aff4Image {
 
     /// Names of the image entries stored in the volume.
     image_entry_names: Vec<String>,
+
+    /// Media of a standard AFF4 volume (None for a legacy volume).
+    ///
+    /// A standard AFF4 volume (for example AFF4 Standard v1.0a) stores its
+    /// image as data stream and map nodes; the media reads the image through
+    /// those nodes.
+    standard_media: Option<Aff4StandardMedia>,
 }
 
 impl Default for Aff4Image {
@@ -82,6 +90,7 @@ impl Aff4Image {
             media_size: 0,
             zip_file: crate::zip::ZipFile::new(),
             image_entry_names: Vec::new(),
+            standard_media: None,
         }
     }
 
@@ -97,6 +106,14 @@ impl Aff4Image {
 
     /// Retrieves a data stream.
     pub fn get_data_stream(&self) -> DataStreamReference {
+        match self.standard_media.as_ref() {
+            Some(media) => {
+                return Arc::new(RwLock::new(Aff4StandardBlockStream::new(
+                    Aff4StandardReader::new(media.clone()),
+                )));
+            }
+            None => {}
+        }
         Arc::new(RwLock::new(Aff4BlockStream::new(Aff4BlockReader::new(
             &self.zip_file,
             self.get_image_entry_name(),
@@ -109,6 +126,17 @@ impl Aff4Image {
         &self,
         index: usize,
     ) -> Result<DataStreamReference, ErrorTrace> {
+        if let Some(media) = self.standard_media.as_ref() {
+            if index > 0 {
+                return Err(keramics_core::error_trace_new!(format!(
+                    "No image with index: {} in volume",
+                    index
+                )));
+            }
+            return Ok(Arc::new(RwLock::new(Aff4StandardBlockStream::new(
+                Aff4StandardReader::new(media.clone()),
+            ))));
+        }
         match self.image_entry_names.get(index) {
             Some(image_entry_name) => match self.zip_file.get_entry(image_entry_name) {
                 Some(entry) => Ok(Arc::new(RwLock::new(Aff4BlockStream::new(
@@ -175,6 +203,12 @@ impl Aff4Image {
 
     /// Retrieves the media size of the image with the specified index.
     pub fn get_media_size_by_index(&self, index: usize) -> Option<u64> {
+        if let Some(media) = self.standard_media.as_ref() {
+            return match index {
+                0 => Some(media.get_media_size()),
+                _ => None,
+            };
+        }
         self.image_entry_names
             .get(index)
             .and_then(|image_entry_name| {
@@ -209,6 +243,39 @@ impl Aff4Image {
         let version_major: u16 = aff4_file.get_version().major;
         let version_minor: u16 = aff4_file.get_version().minor;
         let tool: String = aff4_file.get_version().tool.clone();
+
+        if aff4_file.is_standard() {
+            // A standard AFF4 volume (for example AFF4 Standard v1.0a)
+            // stores its image as data stream and map nodes; the media is
+            // read through those nodes and its companion volumes.
+            let media: Aff4StandardMedia = match Aff4StandardMedia::open(file_resolver, file_name) {
+                Ok(media) => media,
+                Err(mut error) => {
+                    keramics_core::error_trace_add_frame!(
+                        error,
+                        "Unable to open AFF4 standard media"
+                    );
+                    return Err(error);
+                }
+            };
+            let media_size: u64 = media.get_media_size();
+            let image_entry_names: Vec<String> = vec![media.get_image_name().to_string()];
+            let bytes_per_sector: u32 = media.get_bytes_per_sector();
+            self.standard_media = Some(media);
+            self.image_entry_names = image_entry_names;
+            self.container_uri = container_uri;
+            self.volume_uri = volume_uri;
+            self.version_major = version_major;
+            self.version_minor = version_minor;
+            self.tool = tool;
+            self.bytes_per_sector = bytes_per_sector;
+            self.media_size = media_size;
+            self.file_resolver = file_resolver.clone();
+            self.name = file_name.to_string();
+
+            return Ok(());
+        }
+
         let image_entry_names: Vec<String> = aff4_file.get_image_names();
         if image_entry_names.is_empty() {
             return Err(keramics_core::error_trace_new!(
@@ -441,5 +508,84 @@ mod tests {
         Ok(())
     }
 
-    // TODO: add tests for open
+    fn get_standard_image(file_name: &str) -> Result<Aff4Image, ErrorTrace> {
+        let mut image: Aff4Image = Aff4Image::new();
+
+        let path_string: String = get_test_data_path("aff4");
+        let path_buf: PathBuf = PathBuf::from(path_string.as_str());
+        let file_resolver: FileResolverReference =
+            FileResolverReference::new(Box::new(OsFileResolver::new(path_buf)));
+
+        let file_name: PathComponent = PathComponent::from(file_name);
+        image.open(&file_resolver, &file_name)?;
+
+        Ok(image)
+    }
+
+    /// Reads the bevy data entry of the `split.aff4` volume, used as the
+    /// comparison data for the standard split volume test.
+    fn get_split_entry_data() -> Result<Vec<u8>, ErrorTrace> {
+        use crate::zip::ZipFile;
+
+        let path_string: String = get_test_data_path("aff4/split.aff4");
+        let path_buf: PathBuf = PathBuf::from(path_string.as_str());
+        let data_stream: DataStreamReference = open_os_data_stream(&path_buf)?;
+
+        let mut zip_file: ZipFile = ZipFile::new();
+        zip_file.read_data_stream(&data_stream)?;
+
+        let entry: crate::zip::ZipEntry = zip_file
+            .get_entry("file%3A/tmp/keramics_aff4_split.raw/00000000")
+            .cloned()
+            .ok_or_else(|| {
+                keramics_core::error_trace_new!("Missing bevy data entry in split volume")
+            })?;
+        let mut data: Vec<u8> = vec![0; entry.uncompressed_size as usize];
+        zip_file.read_entry_data(&entry, &mut data)?;
+
+        Ok(data)
+    }
+
+    #[test]
+    fn test_standard_split_image() -> Result<(), ErrorTrace> {
+        let image: Aff4Image = get_standard_image("split.aff4")?;
+
+        assert_eq!(image.get_name(), "split.aff4");
+        assert_eq!(
+            image.get_container_uri(),
+            "aff4://95580ac9-74ba-4e75-8cf4-8e83224252e8"
+        );
+        assert_eq!(image.get_version_major(), 1);
+        assert_eq!(image.get_version_minor(), 0);
+        assert_eq!(image.get_tool(), "libaff4 2.0 pre-release");
+        assert_eq!(image.get_bytes_per_sector(), 512);
+        assert_eq!(image.get_media_size(), 12582912);
+        assert_eq!(image.get_number_of_images(), 1);
+        // The media size and image node are taken from the companion
+        // metadata volume (`split.aff4.A01`).
+        assert_eq!(
+            image.get_image_entry_name(),
+            "aff4://95580ac9-74ba-4e75-8cf4-8e83224252e8/file:/tmp/keramics_aff4_split.raw"
+        );
+
+        let data_stream: DataStreamReference = image.get_data_stream_by_index(0)?;
+        let size: u64 = keramics_core::data_stream_get_size!(data_stream.clone());
+        assert_eq!(size, 12582912);
+
+        // The complete media read matches the bevy data entry; the chunks
+        // are stored raw, so this covers the direct stream path.
+        let mut data: Vec<u8> = vec![0; size as usize];
+        let read_size: usize = keramics_core::data_stream_read_at_position!(
+            data_stream.clone(),
+            &mut data,
+            SeekFrom::Start(0)
+        );
+        assert_eq!(read_size, size as usize);
+
+        let entry_data: Vec<u8> = get_split_entry_data()?;
+        assert_eq!(data.len(), entry_data.len());
+        assert_eq!(data, entry_data);
+
+        Ok(())
+    }
 }

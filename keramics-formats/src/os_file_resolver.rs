@@ -58,6 +58,33 @@ impl OsFileResolver {
 }
 
 impl FileResolver for OsFileResolver {
+    /// Retrieves the names of the files stored in the directory with the specified path.
+    fn list_file_names(
+        &self,
+        path_components: &[PathComponent],
+    ) -> Result<Vec<String>, ErrorTrace> {
+        let mut file_names: Vec<String> = Vec::new();
+
+        let path_buf: PathBuf = self.get_path(path_components);
+        let directory_contents: std::io::Result<std::fs::ReadDir> = std::fs::read_dir(&path_buf);
+        match directory_contents {
+            Ok(directory_iterator) => {
+                for entry in directory_iterator.flatten() {
+                    let file_type: Option<std::fs::FileType> = entry.file_type().ok();
+                    if let Some(file_type) = file_type {
+                        if file_type.is_file() {
+                            if let Some(file_name) = entry.file_name().to_str() {
+                                file_names.push(file_name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            Err(_) => {}
+        }
+        Ok(file_names)
+    }
+
     /// Retrieves a data stream with the specified path.
     fn get_data_stream(
         &self,
