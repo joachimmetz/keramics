@@ -20,12 +20,20 @@ use crate::path_component::PathComponent;
 pub(super) struct CdFsFileName {
     /// Name.
     name: ByteString,
+
+    /// Value indicating exact case-sensitive matching without ISO 9660 version stripping.
+    exact: bool,
 }
 
 impl CdFsFileName {
-    /// Creates a new CDFS file entry name.
+    /// Creates a new CDFS file entry name for ISO 9660 or Joliet matching.
     pub fn new(name: ByteString) -> Self {
-        Self { name }
+        Self { name, exact: false }
+    }
+
+    /// Creates a new CDFS file entry name for exact matching (Rock Ridge or UDF).
+    pub fn new_exact(name: ByteString) -> Self {
+        Self { name, exact: true }
     }
 
     /// Determines if a sub file entry name matches the entry name.
@@ -33,9 +41,12 @@ impl CdFsFileName {
         match sub_file_entry_name {
             PathComponent::Root | PathComponent::Parent | PathComponent::Current => false,
             _ => {
+                if self.exact {
+                    return self.name.to_string() == sub_file_entry_name.to_string();
+                }
                 let sub_file_entry_name_string: String =
-                    sub_file_entry_name.to_string().to_ascii_lowercase();
-                let entry_name_string: String = self.name.to_string().to_ascii_lowercase();
+                    sub_file_entry_name.to_string().to_lowercase();
+                let entry_name_string: String = self.name.to_string().to_lowercase();
 
                 // CDFS entry names consist of a base name, an extension part and
                 // a version number, e.g. EMPTYFILE.;1 or EMPTYFILE.TXT;1.
@@ -88,5 +99,19 @@ mod tests {
 
         let result: bool = entry_name.compare(&PathComponent::from("NONEXISTENT"));
         assert!(!result);
+    }
+
+    #[test]
+    fn test_compare_exact_and_joliet() {
+        let exact_name: CdFsFileName = CdFsFileName::new_exact(ByteString {
+            encoding: CharacterEncoding::Utf8,
+            elements: b"MixedCase.txt".to_vec(),
+        });
+        assert!(exact_name.compare(&PathComponent::from("MixedCase.txt")));
+        assert!(!exact_name.compare(&PathComponent::from("mixedcase.txt")));
+
+        let joliet_name: CdFsFileName = CdFsFileName::new(ByteString::from("Test\u{00e9};1"));
+        assert!(joliet_name.compare(&PathComponent::from("test\u{00e9}")));
+        assert!(joliet_name.compare(&PathComponent::from("Test\u{00e9};1")));
     }
 }

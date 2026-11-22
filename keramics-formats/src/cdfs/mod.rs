@@ -21,6 +21,8 @@ mod path_table;
 mod path_table_record;
 mod path_table_record_be;
 mod path_table_record_le;
+mod rock_ridge;
+mod udf;
 mod volume;
 mod volume_descriptor;
 mod volume_set;

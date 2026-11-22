@@ -162,6 +162,26 @@ impl CdFsFileSystem {
     pub fn get_root_file_entry(&self) -> Result<CdFsFileEntry, ErrorTrace> {
         match self.volumes.first() {
             Some(volume) => {
+                if let Some(udf_volume) = volume.get_udf_volume() {
+                    let root_entry: super::udf::UdfFileEntry =
+                        match udf_volume.read_file_entry(&udf_volume.root_directory_icb) {
+                            Ok(entry) => entry,
+                            Err(mut error) => {
+                                keramics_core::error_trace_add_frame!(
+                                    error,
+                                    "Unable to read UDF root file entry"
+                                );
+                                return Err(error);
+                            }
+                        };
+                    return Ok(CdFsFileEntry::new_udf(
+                        udf_volume.clone(),
+                        root_entry,
+                        None,
+                        true,
+                        None,
+                    ));
+                }
                 let data_stream: &DataStreamReference = match volume.get_data_stream() {
                     Some(data_stream) => data_stream,
                     None => {
@@ -172,11 +192,15 @@ impl CdFsFileSystem {
                 let directory_record: CdFsDirectoryRecord = volume.get_root_directory().clone();
                 let directory_record_offset: u64 = volume.get_root_directory_record_offset();
 
-                Ok(CdFsFileEntry::new(
+                Ok(CdFsFileEntry::new_with_options(
                     data_stream,
                     bytes_per_sector,
+                    volume.get_character_encoding(),
+                    volume.has_rock_ridge(),
+                    volume.get_susp_skip_length(),
                     directory_record_offset,
                     directory_record,
+                    None,
                 ))
             }
             None => Err(keramics_core::error_trace_new!("Missing volumes")),
@@ -330,6 +354,16 @@ mod tests {
         let unread_volume: Arc<CdFsVolume> = Arc::new(CdFsVolume::new());
         let unread_file_system: CdFsFileSystem = CdFsFileSystem::new(&[unread_volume]);
         let result: Result<CdFsFileEntry, ErrorTrace> = unread_file_system.get_root_file_entry();
+        assert!(result.is_err());
+
+        // Test UDF volume whose root ICB sector is corrupted after opening.
+        let mut udf_image: Vec<u8> = crate::cdfs::udf::tests::build_test_udf_image();
+        udf_image[261 * 2048..262 * 2048].fill(0);
+        let udf_stream: DataStreamReference = keramics_core::open_fake_data_stream(&udf_image);
+        let mut udf_volume: CdFsVolume = CdFsVolume::new();
+        udf_volume.read_data_stream(&udf_stream).unwrap();
+        let udf_file_system: CdFsFileSystem = udf_volume.get_file_system().unwrap();
+        let result: Result<CdFsFileEntry, ErrorTrace> = udf_file_system.get_root_file_entry();
         assert!(result.is_err());
     }
 }

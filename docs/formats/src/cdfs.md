@@ -16,11 +16,12 @@ ISO 9660 defines the following interchange levels:
 
 There are various extensions to ISO 9660, namely:
 
-* Apple Hybrid CD extension, which combines CDFS and [HFS](hfs.md)
-* Joliet, which adds Unicode (UCS-2) character support
-* Rock Ridge, which adds support for POSIX permissions and overcome file name restrictions
-* El Torito, which adds support for bootable CD-ROMs
-* UDF (Universal Disk Format) (or ECMA-167)
+* [Apple Hybrid CD extension](#apple_hybrid_cd_extension), which combines CDFS and [HFS](hfs.md)
+* [Joliet](#joliet), which adds Unicode (UCS-2) character support
+* [Rock Ridge](#rock_ridge), which adds support for POSIX permissions and overcomes file name
+  restrictions
+* [El Torito](#el_torito), which adds support for bootable CD-ROMs
+* [UDF (Universal Disk Format)](#udf) (or ECMA-167)
 
 ## Overview
 
@@ -489,6 +490,341 @@ The extended attribute record (XAR) is of variable size and consists of:
 > Note that if the [record format](#record_format) is 0, the record attributes are ignored in
 > interchange.
 
+## Extensions
+
+### Apple Hybrid CD extension {#apple_hybrid_cd_extension}
+
+An Apple Hybrid CD combines an ISO 9660 file system and an [HFS](hfs.md) (or HFS+) file system on
+the same optical disc so that macOS systems mount the HFS volume while other operating systems
+mount the ISO 9660 volume.
+
+The hybrid layout takes advantage of the unused 16-sector (32 KiB) ISO 9660 system area at the
+beginning of the disc:
+
+* Offset `0` (512 bytes) contains an [Apple Partition Map (APM)](apm.md) driver descriptor map
+  (signature `"ER"`).
+* Subsequent blocks inside the 32 KiB system area contain [APM](apm.md) partition map entries
+  (signature `"PM"`), including an `"Apple_HFS"` partition entry that points to the [HFS](hfs.md)
+  (or HFS+) volume.
+* Offset `32768` (sector 16) begins the standard ISO 9660 volume descriptor set as usual.
+
+In a shared hybrid disc, both the ISO 9660 directory records and the HFS/HFS+ catalog extents
+reference the same file data sectors on disc. In a non-shared hybrid disc, each file system stores
+its file data in separate regions.
+
+#### Apple ISO 9660 extensions
+
+In addition to hybrid APM/HFS discs, Apple Technical Note FL 36 defines System Use entries stored
+at the end of ISO 9660 [directory records](#directory_record) to preserve classic Mac OS Finder
+metadata on ISO 9660 volumes:
+
+<!-- typos:disable -->
+
+* The legacy `"BA"` (`0x42, 0x41`) entry precedes SUSP and consists of the 2-byte signature `"BA"`,
+  a 1-byte system use identifier (`0x01` for ProDOS, `0x02` for HFS, `0x06` for HFS with icon and
+  comment support), followed by HFS Finder information (4-byte file type, 4-byte file creator, and
+  2-byte Finder flags).
+
+<!-- typos:enable -->
+* The SUSP-compatible `"AA"` (`0x41, 0x41`) entry conforms to the
+  [SUSP entry header](#susp_entry_header):
+
+| Offset | Size | Value | Description |
+| --- | --- | --- | --- |
+| 0 | 2 | "AA" | Signature |
+| 2 | 1 | | Entry size |
+| 3 | 1 | 2 | Entry version |
+| 4 | 1 | | System use identifier (`0x02` for HFS) |
+| 5 | 4 | | HFS file type (files only) |
+| 9 | 4 | | HFS file creator (files only) |
+| 13 | 2 | | HFS Finder flags (at offset 5 for directories) |
+
+> Note that when Apple ISO 9660 extensions are used without an HFS volume, Mac OS resource forks
+> are stored as associated ISO 9660 files whose directory records have [file flag](#file_flags)
+> `0x04` (is associated file) set.
+
+### Joliet {#joliet}
+
+Joliet is a Microsoft extension to ISO 9660 that provides Unicode file names and relaxes ISO 9660
+naming and directory-depth restrictions while remaining backward-compatible with standard ISO 9660
+readers.
+
+A Joliet volume adds a [Secondary (Supplementary) Volume Descriptor](#secondary_volume_descriptor)
+(type indicator `2`, format version `1`) that references a separate directory hierarchy and path
+tables whose strings are encoded in big-endian UCS-2 (UTF-16BE).
+
+#### Joliet escape sequences
+
+A Joliet supplementary volume descriptor is identified by its 32-byte
+[escape sequences](#escape_sequences) field at offset 88 (unused trailing bytes are set to `0x00`):
+
+| Value | Identifier | Description |
+| --- | --- | --- |
+| "\x25\x2f\x40" or "%/@" | UCS-2 Level 1 | Basic Multilingual Plane without combining characters |
+| "\x25\x2f\x43" or "%/C" | UCS-2 Level 2 | Basic Multilingual Plane with limited combining characters |
+| "\x25\x2f\x45" or "%/E" | UCS-2 Level 3 | Full UCS-2 Basic Multilingual Plane |
+
+#### Joliet naming and layout differences
+
+Compared to the Primary Volume Descriptor hierarchy, a Joliet hierarchy has the following
+differences:
+
+* Volume descriptor string fields (such as system identifier, volume identifier, volume set
+  identifier, publisher, data preparer, application, copyright, abstract, and bibliographic file
+  identifiers) are encoded in big-endian UCS-2 and padded with `0x0020` (for odd-sized 37-byte
+  fields, the last byte is `0x00`).
+* File and directory names in directory records and path table records are encoded in big-endian
+  UCS-2. The Joliet specification allows names up to 64 UCS-2 characters (128 bytes), though some
+  authoring tools emit up to 103 or 110 characters within the 255-byte directory record limit.
+* All UCS-2 characters are permitted except control characters (`0x0000` to `0x001f`) and `"*"`,
+  `"/"`, `":"`, `";"`, `"?"`, and `"\\"`. Lowercase characters, spaces, and multiple dots are
+  allowed.
+* File names retain the `";1"` version suffix encoded in big-endian UCS-2 (`0x00, 0x3b, 0x00,
+  0x31`), while the trailing dot before the version suffix is optional when no extension is
+  present.
+* The root directory identifier in path tables and directory records remains the single byte `0x00`
+  (and the parent directory identifier remains `0x01`).
+* Directory hierarchy depth is not limited to 8 levels.
+
+### Rock Ridge {#rock_ridge}
+
+Rock Ridge adds POSIX file system semantics to ISO 9660 volumes through two layered IEEE
+specifications:
+
+* **System Use Sharing Protocol (SUSP)** (IEEE P1281), which defines a structured record format
+  inside the System Use area at the end of ISO 9660 [directory records](#directory_record) (after
+  the file identifier and optional 1-byte alignment padding).
+* **Rock Ridge Interchange Protocol (RRIP)** (IEEE P1282), which defines POSIX metadata records on
+  top of SUSP.
+
+#### SUSP entry header {#susp_entry_header}
+
+Every SUSP and RRIP entry begins with a 4-byte header:
+
+| Offset | Size | Value | Description |
+| --- | --- | --- | --- |
+| 0 | 2 | | Signature (2-byte ASCII identifier) |
+| 2 | 1 | | Entry size, in bytes (including this header) |
+| 3 | 1 | 1 | Entry version |
+| 4 | ... | | Entry data |
+
+#### SUSP entries
+
+| Value | Identifier | Description |
+| --- | --- | --- |
+| "CE" | Continuation Area | References a continuation block (logical block location, offset within block, and length in both-byte order) when entries exceed the directory record size |
+| "PD" | Padding Field | Unused alignment or reserved padding bytes |
+| "SP" | System Use Sharing Protocol Indicator | Stored in the `"."` entry of the root directory; contains check bytes `0xbe, 0xef` and a 1-byte `LEN_SKP` offset skipped before SUSP entries in each directory record |
+| "ST" | System Use Sharing Protocol Terminator | Terminates the sequence of System Use entries in a directory record or continuation area |
+| "ER" | Extensions Reference | Declares an active extension (for example `"RRIP_1991A"`, `"IEEE_P1282"`, or `"IEEE_1282"`) with identifier, descriptor, and source strings |
+| "ES" | Extension Selector | Selects which registered extension subsequent entries belong to (SUSP 1.12) |
+
+#### RRIP entries
+
+<!-- typos:disable -->
+
+| Value | Identifier | Description |
+| --- | --- | --- |
+| "PX" | POSIX File Attributes | File mode (`st_mode`), link count (`st_nlink`), user identifier (`st_uid`), group identifier (`st_gid`), and optional file serial number (`st_ino`, RRIP 1.12) in both-byte order |
+| "PN" | POSIX Device Number | High and low 32-bit device numbers (`dev_t_high`, `dev_t_low`) in both-byte order for block and character special files |
+| "SL" | Symbolic Link | Symbolic link target encoded as a sequence of component records (`flags`, `length`, `content`), supporting continuation (`0x01`), current directory (`0x02`), parent directory (`0x04`), and root (`0x08`) |
+| "NM" | Alternate Name | POSIX file name supporting mixed case and arbitrary byte sequences, prefixed by a 1-byte flags field (`0x01` continue, `0x02` current, `0x04` parent) |
+| "CL" | Child Link | Logical block location (both-byte order) of a relocated directory moved out of a hierarchy deeper than 8 levels |
+| "PL" | Parent Link | Logical block location (both-byte order) of the original parent directory of a relocated directory |
+| "RE" | Relocated Directory | Marks a placeholder directory (commonly `RR_MOVED`) that stores relocated subdirectories so RRIP-aware readers hide it |
+| "TF" | Time Stamp(s) | Stores one or more timestamps selected by a 1-byte flags bitmask |
+| "SF" | Sparse File | Virtual file size and table depth for sparse file data |
+| "RR" | Rock Ridge Indicator | Deprecated RRIP 1.09 1-byte bitmask indicating which RRIP entries appear in the directory record |
+
+<!-- typos:enable -->
+
+#### POSIX file attributes ("PX") entry
+
+A `"PX"` entry is 36 bytes (RRIP 1.09) or 44 bytes (RRIP 1.12) in size:
+
+| Offset | Size | Value | Description |
+| --- | --- | --- | --- |
+| 0 | 2 | "PX" | Signature |
+| 2 | 1 | 36 or 44 | Entry size |
+| 3 | 1 | 1 | Entry version |
+| 4 | 8 | | POSIX file mode (`st_mode`), in both-byte order |
+| 12 | 8 | | POSIX file links (`st_nlink`), in both-byte order |
+| 20 | 8 | | POSIX user identifier (`st_uid`), in both-byte order |
+| 28 | 8 | | POSIX group identifier (`st_gid`), in both-byte order |
+| 36 | 8 | | POSIX file serial number (`st_ino`), in both-byte order (RRIP 1.12 only) |
+
+#### Time stamps ("TF") entry flags
+
+The `"TF"` entry stores a 1-byte flags field at offset 4, followed by one timestamp per set flag bit
+in ascending bit order:
+
+| Value | Identifier | Description |
+| --- | --- | --- |
+| 0x01 | CREATION | Creation time |
+| 0x02 | MODIFY | (Last) modification time |
+| 0x04 | ACCESS | (Last) access time |
+| 0x08 | ATTRIBUTES | (Last) attribute change time |
+| 0x10 | BACKUP | (Last) backup time |
+| 0x20 | EXPIRATION | Expiration time |
+| 0x40 | EFFECTIVE | Effective time |
+| 0x80 | LONG_FORM | Uses 17-byte [date and time string](#date_time_string) format when set, or 7-byte [date and time value](#date_time_value) format when clear |
+
+### El Torito {#el_torito}
+
+El Torito is an extension to ISO 9660 that enables optical discs to boot x86 BIOS, PowerPC, Mac,
+and UEFI systems.
+
+#### Boot record volume descriptor
+
+An El Torito disc contains a [Boot Record](#boot_record) volume descriptor (type indicator `0`,
+signature `"CD001"`, format version `1`) with the following fields:
+
+| Offset | Size | Value | Description |
+| --- | --- | --- | --- |
+| 0 | 1 | 0 | [Type indicator](#volume_descriptor_type_indicators) |
+| 1 | 5 | "CD001" | Signature |
+| 6 | 1 | 1 | Format version |
+| 7 | 32 | "EL TORITO SPECIFICATION" | Boot system identifier, padded with 0-byte values |
+| 39 | 32 | 0 | Unused (boot identifier) |
+| 71 | 4 | | Boot catalog absolute logical sector number (2048-byte sector), in little-endian |
+| 75 | 1973 | 0 | Unused |
+
+#### Boot catalog
+
+The boot catalog begins at the sector referenced by the boot record and consists of a sequence of
+32-byte entries: a Validation Entry, an Initial/Default Entry, and optional Section Header, Section
+Entry, and Section Entry Extension records (for multi-platform or UEFI boot images).
+
+##### Validation entry
+
+| Offset | Size | Value | Description |
+| --- | --- | --- | --- |
+| 0 | 1 | 0x01 | Header identifier |
+| 1 | 1 | | [Platform identifier](#el_torito_platform_identifiers) |
+| 2 | 2 | 0 | Reserved |
+| 4 | 24 | | Identifier string (manufacturer or developer) |
+| 28 | 2 | | Checksum word, in little-endian (sum of all sixteen 16-bit little-endian words in the entry must equal `0x0000`) |
+| 30 | 2 | "\x55\xaa" | Key bytes |
+
+##### Initial/Default entry
+
+| Offset | Size | Value | Description |
+| --- | --- | --- | --- |
+| 0 | 1 | | Boot indicator (`0x88` = bootable, `0x00` = not bootable) |
+| 1 | 1 | | [Boot media type](#el_torito_boot_media_types) |
+| 2 | 2 | | Load segment, in little-endian (`0x0000` uses default segment `0x07c0`) |
+| 4 | 1 | | System type (copy of the partition type byte from the boot image's MBR partition table) |
+| 5 | 1 | 0 | Unused |
+| 6 | 2 | | Sector count (number of 512-byte virtual sectors to load), in little-endian |
+| 8 | 4 | | Load RBA (starting 2048-byte logical sector of the boot image), in little-endian |
+| 12 | 20 | 0 | Unused |
+
+##### Section header entry
+
+| Offset | Size | Value | Description |
+| --- | --- | --- | --- |
+| 0 | 1 | | Header indicator (`0x90` = more section headers follow, `0x91` = final section header) |
+| 1 | 1 | | [Platform identifier](#el_torito_platform_identifiers) |
+| 2 | 2 | | Number of section entries following this header, in little-endian |
+| 4 | 28 | | Section identifier string |
+
+Each following Section Entry uses the same layout as the Initial/Default Entry for offsets 0
+through 11, with a 1-byte selection criteria type at offset 12 and 19 bytes of vendor-unique
+selection criteria at offsets 13 through 31. Additional selection criteria can follow in 32-byte
+Section Entry Extensions (header indicator `0x44`).
+
+##### Platform identifiers {#el_torito_platform_identifiers}
+
+| Value | Identifier | Description |
+| --- | --- | --- |
+| 0x00 | | 80x86 |
+| 0x01 | | PowerPC |
+| 0x02 | | Mac |
+| 0xef | | EFI (UEFI) |
+
+##### Boot media types {#el_torito_boot_media_types}
+
+| Value | Identifier | Description |
+| --- | --- | --- |
+| 0x00 | | No emulation |
+| 0x01 | | 1.2 MiB floppy disk emulation |
+| 0x02 | | 1.44 MiB floppy disk emulation |
+| 0x03 | | 2.88 MiB floppy disk emulation |
+| 0x04 | | Hard disk emulation |
+
+### UDF (Universal Disk Format) {#udf}
+
+Universal Disk Format (UDF) is a file system specification maintained by the Optical Storage
+Technology Association (OSTA) as a profile of ISO/IEC 13346 (ECMA-167), with revisions 1.02, 1.50,
+2.00, 2.01, 2.50, and 2.60. UDF replaces ISO 9660 for DVD, Blu-ray, and rewritable optical media,
+removing the 4 GiB file size limit and adding Unicode names, sparse and inline files, metadata
+partitions, and packet-written update support.
+
+#### ISO 9660 / UDF Bridge and Volume Recognition Sequence
+
+Optical discs frequently contain both ISO 9660 and UDF structures on the same medium (an ISO 9660 /
+UDF Bridge disc). After the 32 KiB system area (sectors 0 to 15) and the ISO 9660 volume descriptor
+set (ending with the [volume descriptor set terminator](#volume_descriptor_set_terminator)), the
+ECMA-167 Volume Recognition Sequence (VRS) appears as a contiguous series of 2048-byte descriptors
+using the same header layout (`type`, 5-byte `signature`, `version`):
+
+| Value | Identifier | Description |
+| --- | --- | --- |
+| "BEA01" | Beginning Extended Area Descriptor | Marks the start of the Volume Recognition Sequence |
+| "NSR02" | Volume Structure Descriptor (ECMA-167 2nd edition) | Identifies UDF 1.02 or 1.50 |
+| "NSR03" | Volume Structure Descriptor (ECMA-167 3rd edition) | Identifies UDF 2.00, 2.01, 2.50, or 2.60 |
+| "BOOT2" | Boot Descriptor | Optional ECMA-167 boot descriptor |
+| "TEA01" | Terminating Extended Area Descriptor | Marks the end of the Volume Recognition Sequence |
+
+#### Descriptor tag
+
+All UDF volume, partition, and file system descriptors are little-endian and begin with a 16-byte
+descriptor tag:
+
+| Offset | Size | Value | Description |
+| --- | --- | --- | --- |
+| 0 | 2 | | [Tag identifier](#udf_tag_identifiers) |
+| 2 | 2 | | Descriptor version (2 for ECMA-167 2nd edition, 3 for 3rd edition) |
+| 4 | 1 | | Tag checksum (8-bit sum of bytes 0..3 and 5..15) |
+| 5 | 1 | 0 | Reserved |
+| 6 | 2 | | Tag serial number |
+| 8 | 2 | | Descriptor CRC (CRC-ITU-T / CCITT of descriptor body) |
+| 10 | 2 | | Descriptor CRC length |
+| 12 | 4 | | Tag location (logical sector or logical block number of this descriptor) |
+
+#### Core UDF descriptor structures {#udf_tag_identifiers}
+
+A UDF reader locates the Anchor Volume Descriptor Pointer (AVDP) at logical sector 256 (with
+backup copies at the last sector `N` and/or `N - 256`), follows it to the Main (or Reserve) Volume
+Descriptor Sequence (VDS), resolves the Logical Volume Descriptor and Partition Descriptor(s), and
+then reads the File Set Descriptor to locate the root directory Information Control Block (ICB):
+
+| Value | Identifier | Description |
+| --- | --- | --- |
+| 1 | Primary Volume Descriptor | Volume identifier, volume sequence number, and recording timestamp |
+| 2 | Anchor Volume Descriptor Pointer (AVDP) | Points to the Main and Reserve Volume Descriptor Sequences |
+| 4 | Implementation Use Volume Descriptor | Implementation-specific volume metadata (`*UDF LV Info`) |
+| 5 | Partition Descriptor | Partition starting sector, length, partition number, and access type |
+| 6 | Logical Volume Descriptor | Logical block size, logical volume identifier, partition maps (Type 1 physical, Type 2 virtual/sparable/metadata), and File Set Descriptor location |
+| 7 | Unallocated Space Descriptor | Extents of unallocated space |
+| 8 | Terminating Descriptor | Marks the end of a Volume Descriptor Sequence |
+| 9 | Logical Volume Integrity Descriptor | Integrity type (open or closed), free space, file and directory counts, and minimum/maximum UDF revision |
+| 256 | File Set Descriptor | Located inside the partition; points to the root directory ICB |
+| 257 | File Identifier Descriptor (FID) | Directory entry storing file characteristics flags (hidden, directory, deleted, parent), file identifier, and target ICB |
+| 261 | File Entry | File metadata (timestamps, permissions, UID/GID, link count, size, allocation descriptors or inline data) in UDF 1.02 and 1.50 |
+| 266 | Extended File Entry | Extends File Entry with creation time, object size, and stream directory ICB for named streams and extended attributes in UDF 2.00 and later |
+
+> Note that UDF stores character strings in OSTA Compressed Unicode (CS0), where the first byte is
+> a compression identifier: `0x08` indicates 8-bit ISO-8859-1 characters and `0x10` indicates
+> 16-bit big-endian UCS-2 characters.
+
 ## References
 
 * [ECMA-119: Volume and file structure of CD-ROM for information interchange](https://ecma-international.org/wp-content/uploads/ECMA-119_6th_edition_december_2025.pdf)
+* [Apple Technical Note FL 36: Apple Extensions to ISO 9660](https://developer.apple.com/library/archive/documentation/mac/Files/Files-302.html)
+* [Joliet (file system)](https://en.wikipedia.org/wiki/Joliet_(file_system)), by Wikipedia
+* [IEEE P1281: System Use Sharing Protocol (SUSP) Version 1.12](https://web.archive.org/web/20170404043400/http://www.ymi.com/ymi/sites/default/files/pdf/System%20Use%20Sharing%20Protocol.pdf)
+* [IEEE P1282: Rock Ridge Interchange Protocol (RRIP) Version 1.12](https://web.archive.org/web/20170404043401/http://www.ymi.com/ymi/sites/default/files/pdf/Rock%20Ridge.pdf)
+* ["El Torito" Bootable CD-ROM Format Specification Version 1.0](https://pdos.csail.mit.edu/6.828/2018/readings/boot-cdrom.pdf)
+* [ECMA-167: Volume and File Structure for Write-Once and Rewritable Media using Non-Sequential Recording](https://ecma-international.org/publications-and-standards/standards/ecma-167/)
+* [OSTA Universal Disk Format (UDF) Specification Revision 2.60](https://www.osta.org/specs/pdf/udf260.pdf)

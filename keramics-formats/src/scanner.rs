@@ -145,6 +145,12 @@ impl FormatScanner {
             32769,
             CDFS_VOLUME_DESCRIPTOR_SIGNATURE,
         ));
+        self.signature_scanner.add_signature(Signature::new(
+            "cdfs2",
+            PatternType::BoundToStart,
+            32769,
+            UDF_VRS_SIGNATURE_BEA01,
+        ));
     }
 
     /// Adds Mac OS Encrypted Encoding container signatures.
@@ -525,7 +531,7 @@ impl FormatScanner {
                 "apm1" | "apm2" => FormatIdentifier::Apm,
                 "bde1" | "bde2" | "bde3" | "bde4" => FormatIdentifier::Bde,
                 "bsdlabel1" => FormatIdentifier::BsdDiskLabel,
-                "cdfs1" => FormatIdentifier::CdFs,
+                "cdfs1" | "cdfs2" => FormatIdentifier::CdFs,
                 "cdsaencr1" | "cdsaencr2" => FormatIdentifier::CdsaEncr,
                 "ewf1" | "ewf2" => FormatIdentifier::Ewf,
                 "exfat1" => FormatIdentifier::ExFat,
@@ -649,6 +655,15 @@ mod tests {
         let scan_results: HashSet<FormatIdentifier> =
             format_scanner.scan_data_stream(&data_stream)?;
 
+        assert_eq!(scan_results.len(), 1);
+        assert_eq!(scan_results.iter().next(), Some(&FormatIdentifier::CdFs));
+
+        // Verify pure UDF image (BEA01 at offset 32769) is detected as CdFs.
+        let mut udf_data: Vec<u8> = vec![0; 17 * 2048];
+        udf_data[32769..32774].copy_from_slice(UDF_VRS_SIGNATURE_BEA01);
+        let udf_stream: DataStreamReference = keramics_core::open_fake_data_stream(&udf_data);
+        let scan_results: HashSet<FormatIdentifier> =
+            format_scanner.scan_data_stream(&udf_stream)?;
         assert_eq!(scan_results.len(), 1);
         assert_eq!(scan_results.iter().next(), Some(&FormatIdentifier::CdFs));
 

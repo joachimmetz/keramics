@@ -15,7 +15,7 @@ use keramics_core::ErrorTrace;
 use keramics_encodings::CharacterEncoding;
 use keramics_layout_map::LayoutMap;
 use keramics_types::{
-    ByteString, bytes_to_u16_be, bytes_to_u16_le, bytes_to_u32_be, bytes_to_u32_le,
+    ByteString, Ucs2String, bytes_to_u16_be, bytes_to_u16_le, bytes_to_u32_be, bytes_to_u32_le,
 };
 
 use super::constants::*;
@@ -125,6 +125,26 @@ impl CdFsVolumeDescriptor {
         }
     }
 
+    /// Detects the Joliet UCS-2 level (1, 2, or 3) from a Supplementary Volume Descriptor.
+    pub(super) fn detect_joliet_level(data: &[u8]) -> Option<u8> {
+        if data.len() < 120 {
+            return None;
+        }
+        if data[0] != CDFS_VOLUME_DESCRIPTOR_TYPE_SUPPLEMENTARY || data[6] != 1 {
+            return None;
+        }
+        let escape_sequence: &[u8] = &data[88..91];
+        if escape_sequence == CDFS_JOLIET_ESCAPE_SEQUENCE_LEVEL1 {
+            Some(1)
+        } else if escape_sequence == CDFS_JOLIET_ESCAPE_SEQUENCE_LEVEL2 {
+            Some(2)
+        } else if escape_sequence == CDFS_JOLIET_ESCAPE_SEQUENCE_LEVEL3 {
+            Some(3)
+        } else {
+            None
+        }
+    }
+
     /// Reads the volume descriptor from a buffer.
     pub fn read_data(&mut self, data: &[u8]) -> Result<(), ErrorTrace> {
         if data.len() < 2048 {
@@ -206,6 +226,35 @@ impl CdFsVolumeDescriptor {
         let mut byte_string: ByteString = ByteString::new_with_encoding(&CharacterEncoding::Ascii);
         byte_string.elements.extend_from_slice(trimmed);
         Some(byte_string)
+    }
+
+    /// Reads a trimmed big-endian UCS-2 (UTF-16BE) string from a buffer.
+    pub(super) fn read_trimmed_ucs2_string(
+        data: &[u8],
+        offset: usize,
+        length: usize,
+    ) -> Option<ByteString> {
+        if offset + length > data.len() || length < 2 {
+            return None;
+        }
+        let even_length: usize = length & !1;
+        let slice: &[u8] = &data[offset..offset + even_length];
+        let mut end: usize = slice.len();
+
+        while end >= 2 {
+            let code_unit: u16 = bytes_to_u16_be!(slice, end - 2);
+            if code_unit == 0x0000 || code_unit == 0x0020 {
+                end -= 2;
+            } else {
+                break;
+            }
+        }
+        if end == 0 {
+            return None;
+        }
+        let ucs2_string: Ucs2String = Ucs2String::from_be_bytes(&slice[..end]);
+        let string: String = String::from_utf16_lossy(&ucs2_string.elements);
+        Some(ByteString::from(string.as_str()))
     }
 }
 
@@ -431,6 +480,66 @@ mod tests {
             Some(ByteString {
                 encoding: CharacterEncoding::Ascii,
                 elements: b"TEST".to_vec(),
+            })
+        );
+    }
+
+    #[test]
+    fn test_detect_joliet_level() {
+        assert_eq!(CdFsVolumeDescriptor::detect_joliet_level(&[0; 64]), None);
+
+        let mut supplementary_volume_descriptor: Vec<u8> = vec![0; 128];
+        supplementary_volume_descriptor[0] = CDFS_VOLUME_DESCRIPTOR_TYPE_SUPPLEMENTARY;
+        supplementary_volume_descriptor[6] = 1;
+        assert_eq!(
+            CdFsVolumeDescriptor::detect_joliet_level(&supplementary_volume_descriptor),
+            None
+        );
+
+        supplementary_volume_descriptor[88..91].copy_from_slice(CDFS_JOLIET_ESCAPE_SEQUENCE_LEVEL1);
+        assert_eq!(
+            CdFsVolumeDescriptor::detect_joliet_level(&supplementary_volume_descriptor),
+            Some(1)
+        );
+
+        supplementary_volume_descriptor[88..91].copy_from_slice(CDFS_JOLIET_ESCAPE_SEQUENCE_LEVEL2);
+        assert_eq!(
+            CdFsVolumeDescriptor::detect_joliet_level(&supplementary_volume_descriptor),
+            Some(2)
+        );
+
+        supplementary_volume_descriptor[88..91].copy_from_slice(CDFS_JOLIET_ESCAPE_SEQUENCE_LEVEL3);
+        assert_eq!(
+            CdFsVolumeDescriptor::detect_joliet_level(&supplementary_volume_descriptor),
+            Some(3)
+        );
+
+        supplementary_volume_descriptor[0] = CDFS_VOLUME_DESCRIPTOR_TYPE_PRIMARY;
+        assert_eq!(
+            CdFsVolumeDescriptor::detect_joliet_level(&supplementary_volume_descriptor),
+            None
+        );
+    }
+
+    #[test]
+    fn test_read_trimmed_ucs2_string() {
+        assert_eq!(
+            CdFsVolumeDescriptor::read_trimmed_ucs2_string(&[0x00, 0x41], 1, 4),
+            None
+        );
+        assert_eq!(
+            CdFsVolumeDescriptor::read_trimmed_ucs2_string(&[0x00, 0x20, 0x00, 0x00], 0, 4),
+            None
+        );
+
+        let data: [u8; 8] = [0x00, b'H', 0x00, b'i', 0x00, 0x20, 0x00, 0x00];
+        let result: Option<ByteString> =
+            CdFsVolumeDescriptor::read_trimmed_ucs2_string(&data, 0, 8);
+        assert_eq!(
+            result,
+            Some(ByteString {
+                encoding: CharacterEncoding::Utf8,
+                elements: b"Hi".to_vec(),
             })
         );
     }
