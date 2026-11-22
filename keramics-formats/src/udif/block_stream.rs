@@ -192,7 +192,7 @@ mod tests {
     fn test_seek_from_current() -> Result<(), ErrorTrace> {
         let mut block_stream: UdifBlockStream = get_block_stream()?;
 
-        let offset = block_stream.seek(SeekFrom::Start(1024))?;
+        let offset: u64 = block_stream.seek(SeekFrom::Start(1024))?;
         assert_eq!(offset, 1024);
 
         let offset: u64 = block_stream.seek(SeekFrom::Current(-512))?;

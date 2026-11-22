@@ -216,5 +216,27 @@ mod tests {
         assert_eq!(read_size, 0);
     }
 
-    // TODO: add tests for Aff4BlockStream
+    #[test]
+    fn test_read_data_from_blocks_with_missing_image_entry() -> Result<(), ErrorTrace> {
+        let zip_file: ZipFile = get_zip_file()?;
+        let mut block_reader: Aff4BlockReader = Aff4BlockReader::new(&zip_file, "missing.raw", 512);
+
+        let mut data: Vec<u8> = vec![0; 512];
+        let result: Result<usize, ErrorTrace> = block_reader.read_data_from_blocks(&mut data, 0);
+        assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_data_from_blocks_with_uninitialized_zip_file() {
+        let zip_file: ZipFile = get_zip_file().unwrap();
+        // Specify a wrong size to force ZipFile::read_entry_data to fail on stored entry.
+        let mut block_reader: Aff4BlockReader =
+            Aff4BlockReader::new(&zip_file, "version.txt", 1024);
+
+        let mut data: Vec<u8> = vec![0; 16];
+        let result: Result<usize, ErrorTrace> = block_reader.read_data_from_blocks(&mut data, 0);
+        assert!(result.is_err());
+    }
 }

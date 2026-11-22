@@ -251,12 +251,32 @@ mod tests {
     use std::io::SeekFrom;
     use std::path::PathBuf;
 
-    use keramics_core::{DataStreamReference, open_os_data_stream};
+    use keramics_core::{DataStreamReference, open_fake_data_stream, open_os_data_stream};
 
     use crate::file_resolver::FileResolverReference;
     use crate::os_file_resolver::OsFileResolver;
     use crate::path_component::PathComponent;
     use crate::tests::get_test_data_path;
+
+    fn build_test_aff(segments: &[(&[u8], u32, &[u8])]) -> Vec<u8> {
+        let mut data: Vec<u8> = b"AFF10\r\n\0".to_vec();
+
+        for (name, flag, segment_data) in segments {
+            let segment_size: u32 = (AFF_SEGMENT_HEADER_SIZE
+                + name.len() as u64
+                + segment_data.len() as u64
+                + AFF_SEGMENT_TAIL_SIZE) as u32;
+            data.extend_from_slice(&AFF_SEGMENT_SIGNATURE);
+            data.extend_from_slice(&(name.len() as u32).to_be_bytes());
+            data.extend_from_slice(&(segment_data.len() as u32).to_be_bytes());
+            data.extend_from_slice(&flag.to_be_bytes());
+            data.extend_from_slice(name);
+            data.extend_from_slice(segment_data);
+            data.extend_from_slice(&AFF_SEGMENT_TAIL_SIGNATURE);
+            data.extend_from_slice(&segment_size.to_be_bytes());
+        }
+        data
+    }
 
     fn get_block_reader(file_name: &str) -> Result<AffBlockReader, ErrorTrace> {
         let mut file: AffFile = AffFile::new();
@@ -380,6 +400,116 @@ mod tests {
         assert_eq!(read_size, 512);
         assert_eq!(data, raw_image_data[512..1024]);
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_data_from_blocks_with_cached_page() -> Result<(), ErrorTrace> {
+        let mut reader: AffBlockReader = get_block_reader("ext2.AFF")?;
+        let raw_image_data: Vec<u8> = get_raw_image_data()?;
+
+        let mut first_data: Vec<u8> = vec![0; 512];
+        let first_read_size: usize = reader.read_data_from_blocks(&mut first_data, 0)?;
+        assert_eq!(first_read_size, 512);
+        assert_eq!(first_data, raw_image_data[0..512]);
+
+        let mut second_data: Vec<u8> = vec![0; 512];
+        let second_read_size: usize = reader.read_data_from_blocks(&mut second_data, 512)?;
+        assert_eq!(second_read_size, 512);
+        assert_eq!(second_data, raw_image_data[512..1024]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_data_from_blocks_with_zero_page() -> Result<(), ErrorTrace> {
+        let image_size_data: [u8; 8] = [0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00];
+        let zero_count: [u8; 4] = 32u32.to_be_bytes();
+        let test_data: Vec<u8> = build_test_aff(&[
+            (b"pagesize", 32, b""),
+            (b"imagesize", 0, &image_size_data),
+            (b"page0", AFF_PAGE_FLAG_ZERO, &zero_count),
+        ]);
+
+        let mut file: AffFile = AffFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&test_data);
+        file.read_data_stream(&data_stream)?;
+
+        let mut reader: AffBlockReader = AffBlockReader::new(&file);
+        let mut data: Vec<u8> = vec![0xff; 32];
+        let read_size: usize = reader.read_data_from_blocks(&mut data, 0)?;
+        assert_eq!(read_size, 32);
+        assert_eq!(data, vec![0; 32]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_data_from_blocks_with_missing_page_segment() -> Result<(), ErrorTrace> {
+        let image_size_data: [u8; 8] = [0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00];
+        let test_data: Vec<u8> =
+            build_test_aff(&[(b"pagesize", 32, b""), (b"imagesize", 0, &image_size_data)]);
+
+        let mut file: AffFile = AffFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&test_data);
+        file.read_data_stream(&data_stream)?;
+
+        let mut reader: AffBlockReader = AffBlockReader::new(&file);
+        let mut data: Vec<u8> = vec![0xff; 32];
+        let read_size: usize = reader.read_data_from_blocks(&mut data, 0)?;
+        assert_eq!(read_size, 32);
+        assert_eq!(data, vec![0; 32]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_data_from_blocks_with_oversized_uncompressed_page() -> Result<(), ErrorTrace> {
+        let image_size_data: [u8; 8] = [0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00];
+        let test_data: Vec<u8> = build_test_aff(&[
+            (b"pagesize", 16, b""),
+            (b"imagesize", 0, &image_size_data),
+            (b"page0", 0, &[0x41; 32]),
+        ]);
+
+        let mut file: AffFile = AffFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&test_data);
+        file.read_data_stream(&data_stream)?;
+
+        let mut reader: AffBlockReader = AffBlockReader::new(&file);
+        let mut data: Vec<u8> = vec![0; 16];
+        let result: Result<usize, ErrorTrace> = reader.read_data_from_blocks(&mut data, 0);
+        assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_data_from_blocks_with_unsupported_compression() -> Result<(), ErrorTrace> {
+        let image_size_data: [u8; 8] = [0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00];
+
+        for flag in [
+            AFF_PAGE_FLAG_COMPRESSED | AFF_PAGE_COMPRESSION_ALGORITHM_BZIP2,
+            AFF_PAGE_FLAG_COMPRESSED | AFF_PAGE_COMPRESSION_ALGORITHM_ZERO,
+            AFF_PAGE_FLAG_COMPRESSED | 0x0040,
+            AFF_PAGE_FLAG_COMPRESSED | AFF_PAGE_COMPRESSION_ALGORITHM_ZLIB,
+            AFF_PAGE_FLAG_COMPRESSED | AFF_PAGE_COMPRESSION_ALGORITHM_LZMA,
+        ] {
+            let test_data: Vec<u8> = build_test_aff(&[
+                (b"pagesize", 16, b""),
+                (b"imagesize", 0, &image_size_data),
+                (b"page0", flag, &[0xff, 0xfe, 0xfd, 0xfc]),
+            ]);
+
+            let mut file: AffFile = AffFile::new();
+            let data_stream: DataStreamReference = open_fake_data_stream(&test_data);
+            file.read_data_stream(&data_stream)?;
+
+            let mut reader: AffBlockReader = AffBlockReader::new(&file);
+            let mut data: Vec<u8> = vec![0; 16];
+            let result: Result<usize, ErrorTrace> = reader.read_data_from_blocks(&mut data, 0);
+            assert!(result.is_err());
+        }
         Ok(())
     }
 }

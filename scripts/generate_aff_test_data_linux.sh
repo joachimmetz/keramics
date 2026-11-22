@@ -44,11 +44,11 @@ then
     rm -f "${ZERO_PAGE_SOURCE_IMAGE_FILE}"
 
     # Create an AFF image, with LZMA compressed pages, with an ext2 file system.
-    # Note that keramics does not support AFF images with LZMA compressed pages.
     affconvert -z -y -L -o test_data/aff/ext2_lzma.AFF "${BASE_IMAGE_FILE}"
 
     # Create an AFF directory (AFD) split, with 1 MiB pages, of the ext2 file system image.
     # Note that keramics does not support AFF directory (AFD) splits.
+    rm -rf test_data/aff/ext2_split.afd
     affconvert -z -y -x -s 1m -M1m -o test_data/aff/ext2_split.afd "${BASE_IMAGE_FILE}"
 fi
 

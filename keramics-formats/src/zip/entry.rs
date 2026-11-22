@@ -192,6 +192,13 @@ mod tests {
     }
 
     #[test]
+    fn test_default() {
+        let test_struct: ZipEntry = ZipEntry::default();
+        assert_eq!(test_struct.compression_method, 0);
+        assert!(test_struct.file_name.is_empty());
+    }
+
+    #[test]
     fn test_read_data() -> Result<(), ErrorTrace> {
         let test_data: Vec<u8> = get_test_data();
 

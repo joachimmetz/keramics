@@ -27,7 +27,7 @@ struct Aff4ImageInfo<'a> {
 }
 
 impl<'a> Aff4ImageInfo<'a> {
-    /// Create new image information.
+    /// Creates new image information.
     pub fn new(image: &'a Aff4Image) -> Self {
         Self { image }
     }
@@ -168,6 +168,29 @@ mod tests {
         Ok(())
     }
 
-    // TODO: add tests for open_image
-    // TODO: add tests for print_image
+    #[test]
+    fn test_open_image() -> Result<(), ErrorTrace> {
+        let path_buf: PathBuf = PathBuf::from("../test_data/aff4/ext2.aff4");
+        let image: Aff4Image = Aff4Info::open_image(&path_buf)?;
+        assert_eq!(image.get_name(), "ext2.aff4");
+
+        let missing_path_buf: PathBuf = PathBuf::from("../test_data/aff4/missing.aff4");
+        assert!(Aff4Info::open_image(&missing_path_buf).is_err());
+
+        let root_path_buf: PathBuf = PathBuf::from("/");
+        assert!(Aff4Info::open_image(&root_path_buf).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_print_image() -> Result<(), ErrorTrace> {
+        let path_buf: PathBuf = PathBuf::from("../test_data/aff4/ext2.aff4");
+        Aff4Info::print_image(&path_buf)?;
+
+        let missing_path_buf: PathBuf = PathBuf::from("../test_data/aff4/missing.aff4");
+        assert!(Aff4Info::print_image(&missing_path_buf).is_err());
+
+        Ok(())
+    }
 }

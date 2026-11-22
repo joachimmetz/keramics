@@ -179,7 +179,6 @@ mod tests {
 
     use crate::enums::{VfsFileType, VfsType};
     use crate::file_system::VfsFileSystem;
-
     use crate::tests::get_test_data_path;
 
     fn get_file_system() -> Result<AffFileSystem, ErrorTrace> {
@@ -225,7 +224,15 @@ mod tests {
         Ok(())
     }
 
-    // TODO: add tests for get_bytes_per_sector
+    #[test]
+    fn test_get_bytes_per_sector() -> Result<(), ErrorTrace> {
+        let aff_file_system: AffFileSystem = get_file_system()?;
+
+        let bytes_per_sector: u32 = aff_file_system.get_bytes_per_sector()?;
+        assert_eq!(bytes_per_sector, 512);
+
+        Ok(())
+    }
 
     #[test]
     fn test_get_file_entry_by_path() -> Result<(), ErrorTrace> {
@@ -259,6 +266,14 @@ mod tests {
         let result: Option<AffFileEntry> = aff_file_system.get_file_entry_by_path(&path)?;
         assert!(result.is_none());
 
+        let path: Path = Path::from("aff1");
+        let result: Option<AffFileEntry> = aff_file_system.get_file_entry_by_path(&path)?;
+        assert!(result.is_none());
+
+        let path: Path = Path::from("/aff1/bogus");
+        let result: Option<AffFileEntry> = aff_file_system.get_file_entry_by_path(&path)?;
+        assert!(result.is_none());
+
         Ok(())
     }
 
@@ -287,5 +302,23 @@ mod tests {
         Ok(())
     }
 
-    // TODO: add tests for open_image
+    #[test]
+    fn test_open_with_errors() {
+        let mut aff_file_system: AffFileSystem = AffFileSystem::new();
+        let vfs_location: VfsLocation = VfsLocation::from("/missing.AFF");
+
+        let result: Result<(), ErrorTrace> = aff_file_system.open(None, &vfs_location);
+        assert!(result.is_err());
+
+        let parent_file_system: VfsFileSystemReference =
+            VfsFileSystemReference::new(VfsFileSystem::new(&VfsType::Os));
+        let result: Result<(), ErrorTrace> =
+            aff_file_system.open(Some(&parent_file_system), &vfs_location);
+        assert!(result.is_err());
+
+        let root_location: VfsLocation = VfsLocation::from("/");
+        let result: Result<(), ErrorTrace> =
+            aff_file_system.open(Some(&parent_file_system), &root_location);
+        assert!(result.is_err());
+    }
 }

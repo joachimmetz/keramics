@@ -184,6 +184,10 @@ mod tests {
             4194304
         );
 
+        let file_entry: Aff4FileEntry = get_stream_file_entry(&test_image, 99);
+        let result: Result<Option<DataStreamReference>, ErrorTrace> = file_entry.get_data_stream();
+        assert!(result.is_err());
+
         Ok(())
     }
 
@@ -267,6 +271,10 @@ mod tests {
         assert_eq!(name, PathComponent::from("aff4.s1"));
 
         let result: Result<Aff4FileEntry, ErrorTrace> = file_entry.get_sub_file_entry_by_index(99);
+        assert!(result.is_err());
+
+        let file_entry: Aff4FileEntry = get_stream_file_entry(&test_image, 0);
+        let result: Result<Aff4FileEntry, ErrorTrace> = file_entry.get_sub_file_entry_by_index(0);
         assert!(result.is_err());
 
         Ok(())

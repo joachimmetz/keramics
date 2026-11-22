@@ -30,7 +30,7 @@ pub(super) const AFF_SEGMENT_TAIL_SIGNATURE: [u8; 4] = *b"ATT\0";
 pub(super) const AFF_SEGMENT_TAIL_SIZE: u64 = 8;
 
 /// Maximum size of an AFF segment name in bytes.
-pub(super) const AFF_MAX_SEGMENT_NAME_SIZE: u32 = 64;
+pub(super) const AFF_MAXIMUM_SEGMENT_NAME_SIZE: u32 = 64;
 
 /// AFF flag indicating that the segment data is stored compressed.
 pub(super) const AFF_PAGE_FLAG_COMPRESSED: u32 = 0x0001;

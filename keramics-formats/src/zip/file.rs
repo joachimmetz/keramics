@@ -416,14 +416,119 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    use keramics_core::open_os_data_stream;
+    use keramics_core::{open_fake_data_stream, open_os_data_stream};
 
     use crate::tests::get_test_data_path;
+
+    fn build_test_zip(
+        entries: &[(&[u8], u16, u16, &[u8], u32, u32)],
+        comment: &[u8],
+        use_zip64: bool,
+    ) -> Vec<u8> {
+        let mut archive: Vec<u8> = Vec::new();
+        let mut central_directory: Vec<u8> = Vec::new();
+
+        for (file_name, flags, compression_method, data, uncompressed_size, crc_32) in entries {
+            let local_header_offset: u32 = archive.len() as u32;
+
+            // Local file header (30 bytes + file name).
+            archive.extend_from_slice(ZIP_LOCAL_FILE_HEADER_SIGNATURE);
+            archive.extend_from_slice(&20u16.to_le_bytes());
+            archive.extend_from_slice(&flags.to_le_bytes());
+            archive.extend_from_slice(&compression_method.to_le_bytes());
+            archive.extend_from_slice(&0u16.to_le_bytes());
+            archive.extend_from_slice(&0u16.to_le_bytes());
+            archive.extend_from_slice(&crc_32.to_le_bytes());
+            archive.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            archive.extend_from_slice(&uncompressed_size.to_le_bytes());
+            archive.extend_from_slice(&(file_name.len() as u16).to_le_bytes());
+            archive.extend_from_slice(&0u16.to_le_bytes());
+            archive.extend_from_slice(file_name);
+            archive.extend_from_slice(data);
+
+            // Central directory header (46 bytes + file name).
+            central_directory.extend_from_slice(ZIP_CENTRAL_DIRECTORY_HEADER_SIGNATURE);
+            central_directory.extend_from_slice(&20u16.to_le_bytes());
+            central_directory.extend_from_slice(&20u16.to_le_bytes());
+            central_directory.extend_from_slice(&flags.to_le_bytes());
+            central_directory.extend_from_slice(&compression_method.to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&crc_32.to_le_bytes());
+            central_directory.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            central_directory.extend_from_slice(&uncompressed_size.to_le_bytes());
+            central_directory.extend_from_slice(&(file_name.len() as u16).to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&0u32.to_le_bytes());
+            central_directory.extend_from_slice(&local_header_offset.to_le_bytes());
+            central_directory.extend_from_slice(file_name);
+        }
+        let central_directory_offset: u64 = archive.len() as u64;
+        let central_directory_size: u64 = central_directory.len() as u64;
+        archive.extend_from_slice(&central_directory);
+
+        if use_zip64 {
+            let eocd64_offset: u64 = archive.len() as u64;
+
+            // Zip64 end of central directory record (56 bytes).
+            archive.extend_from_slice(ZIP64_END_OF_CENTRAL_DIRECTORY_RECORD_SIGNATURE);
+            archive.extend_from_slice(&44u64.to_le_bytes());
+            archive.extend_from_slice(&45u16.to_le_bytes());
+            archive.extend_from_slice(&45u16.to_le_bytes());
+            archive.extend_from_slice(&0u32.to_le_bytes());
+            archive.extend_from_slice(&0u32.to_le_bytes());
+            archive.extend_from_slice(&(entries.len() as u64).to_le_bytes());
+            archive.extend_from_slice(&(entries.len() as u64).to_le_bytes());
+            archive.extend_from_slice(&central_directory_size.to_le_bytes());
+            archive.extend_from_slice(&central_directory_offset.to_le_bytes());
+
+            // Zip64 end of central directory locator (20 bytes).
+            archive.extend_from_slice(ZIP64_END_OF_CENTRAL_DIRECTORY_LOCATOR_SIGNATURE);
+            archive.extend_from_slice(&0u32.to_le_bytes());
+            archive.extend_from_slice(&eocd64_offset.to_le_bytes());
+            archive.extend_from_slice(&1u32.to_le_bytes());
+        }
+        // End of central directory record (22 bytes + comment).
+        archive.extend_from_slice(ZIP_END_OF_CENTRAL_DIRECTORY_RECORD_SIGNATURE);
+        archive.extend_from_slice(&0u16.to_le_bytes());
+        archive.extend_from_slice(&0u16.to_le_bytes());
+        if use_zip64 {
+            archive.extend_from_slice(&0xffffu16.to_le_bytes());
+            archive.extend_from_slice(&0xffffu16.to_le_bytes());
+            archive.extend_from_slice(&0xffffffffu32.to_le_bytes());
+            archive.extend_from_slice(&0xffffffffu32.to_le_bytes());
+        } else {
+            archive.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+            archive.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+            archive.extend_from_slice(&(central_directory_size as u32).to_le_bytes());
+            archive.extend_from_slice(&(central_directory_offset as u32).to_le_bytes());
+        }
+        archive.extend_from_slice(&(comment.len() as u16).to_le_bytes());
+        archive.extend_from_slice(comment);
+
+        archive
+    }
+
+    fn compute_crc32(data: &[u8]) -> u32 {
+        let mut crc32_context: ReversedCrc32Context = ReversedCrc32Context::new(0xedb88320, 0);
+        crc32_context.update(data);
+        crc32_context.finalize()
+    }
 
     fn get_data_stream() -> Result<DataStreamReference, ErrorTrace> {
         let path_string: String = get_test_data_path("aff4/ext2.aff4");
         let path_buf: PathBuf = PathBuf::from(path_string.as_str());
         open_os_data_stream(&path_buf)
+    }
+
+    #[test]
+    fn test_default() {
+        let file: ZipFile = ZipFile::default();
+        assert!(file.get_entries().is_empty());
+        assert!(file.get_file_comment().is_empty());
     }
 
     #[test]
@@ -521,5 +626,398 @@ mod tests {
         Ok(())
     }
 
-    // TODO: add tests for read_entries
+    #[test]
+    fn test_read_data_stream_with_unsupported_data_size() {
+        let mut file: ZipFile = ZipFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&[0; 10]);
+
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_missing_end_of_central_directory() {
+        let mut file: ZipFile = ZipFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&[0; 32]);
+
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_central_directory_out_of_bounds() {
+        let mut archive: Vec<u8> = build_test_zip(&[], b"", false);
+        // Set central_directory_size to 1024 so offset + size exceeds file_size.
+        archive[12..16].copy_from_slice(&1024u32.to_le_bytes());
+
+        let mut file: ZipFile = ZipFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_invalid_file_comment_encoding() {
+        let archive: Vec<u8> = build_test_zip(&[], &[0xff, 0xfe], false);
+
+        let mut file: ZipFile = ZipFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_invalid_entry_file_name_encoding() {
+        let content: &[u8] = b"hello";
+        let crc_32: u32 = compute_crc32(content);
+        let archive: Vec<u8> = build_test_zip(
+            &[(
+                &[0xff, 0xfe],
+                0,
+                ZIP_COMPRESSION_METHOD_STORED,
+                content,
+                content.len() as u32,
+                crc_32,
+            )],
+            b"",
+            false,
+        );
+
+        let mut file: ZipFile = ZipFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_invalid_central_directory_entry() {
+        let content: &[u8] = b"hello";
+        let crc_32: u32 = compute_crc32(content);
+        let mut archive: Vec<u8> = build_test_zip(
+            &[(
+                b"test.txt",
+                0,
+                ZIP_COMPRESSION_METHOD_STORED,
+                content,
+                content.len() as u32,
+                crc_32,
+            )],
+            b"",
+            false,
+        );
+        // Corrupt the central directory signature.
+        let central_directory_offset: usize = 30 + b"test.txt".len() + content.len();
+        archive[central_directory_offset] = 0x00;
+
+        let mut file: ZipFile = ZipFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_zip64() -> Result<(), ErrorTrace> {
+        let content: &[u8] = b"zip64 payload";
+        let crc_32: u32 = compute_crc32(content);
+        let archive: Vec<u8> = build_test_zip(
+            &[(
+                b"payload.bin",
+                0,
+                ZIP_COMPRESSION_METHOD_STORED,
+                content,
+                content.len() as u32,
+                crc_32,
+            )],
+            b"zip64 comment",
+            true,
+        );
+
+        let mut file: ZipFile = ZipFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+        file.read_data_stream(&data_stream)?;
+
+        assert_eq!(file.get_entries().len(), 1);
+        assert_eq!(file.get_file_comment(), "zip64 comment");
+
+        let entry: ZipEntry = file.get_entry("payload.bin").unwrap().clone();
+        let mut read_data: Vec<u8> = vec![0; content.len()];
+        file.read_entry_data(&entry, &mut read_data)?;
+        assert_eq!(read_data, content);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_data_stream_with_zip64_missing_locator() {
+        // EOCD at offset 0 with Zip64 sentinel values leaves < 20 bytes before it.
+        let mut eocd: Vec<u8> = Vec::new();
+        eocd.extend_from_slice(ZIP_END_OF_CENTRAL_DIRECTORY_RECORD_SIGNATURE);
+        eocd.extend_from_slice(&0u16.to_le_bytes());
+        eocd.extend_from_slice(&0u16.to_le_bytes());
+        eocd.extend_from_slice(&0xffffu16.to_le_bytes());
+        eocd.extend_from_slice(&0xffffu16.to_le_bytes());
+        eocd.extend_from_slice(&0xffffffffu32.to_le_bytes());
+        eocd.extend_from_slice(&0xffffffffu32.to_le_bytes());
+        eocd.extend_from_slice(&0u16.to_le_bytes());
+
+        let mut file: ZipFile = ZipFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&eocd);
+
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_zip64_invalid_locator() {
+        let mut archive: Vec<u8> = build_test_zip(&[], b"", true);
+        // Corrupt the Zip64 locator signature (20 bytes before EOCD).
+        let locator_offset: usize = archive.len() - 22 - 20;
+        archive[locator_offset] = 0x00;
+
+        let mut file: ZipFile = ZipFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_zip64_record_offset_out_of_bounds() {
+        let mut archive: Vec<u8> = build_test_zip(&[], b"", true);
+        let locator_offset: usize = archive.len() - 22 - 20;
+        // Point eocd64_offset past file_size.
+        archive[(locator_offset + 8)..(locator_offset + 16)]
+            .copy_from_slice(&999999u64.to_le_bytes());
+
+        let mut file: ZipFile = ZipFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_zip64_invalid_record() {
+        let mut archive: Vec<u8> = build_test_zip(&[], b"", true);
+        // Corrupt the Zip64 EOCD record signature (at offset 0 for empty archive).
+        archive[0] = 0x00;
+
+        let mut file: ZipFile = ZipFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_entry_data_with_missing_data_stream() {
+        let mut file: ZipFile = ZipFile::new();
+        let entry: ZipEntry = ZipEntry::new();
+        let mut data: Vec<u8> = Vec::new();
+
+        let result: Result<(), ErrorTrace> = file.read_entry_data(&entry, &mut data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_entry_data_with_encrypted_entry() -> Result<(), ErrorTrace> {
+        let content: &[u8] = b"secret";
+        let crc_32: u32 = compute_crc32(content);
+        let archive: Vec<u8> = build_test_zip(
+            &[(
+                b"secret.bin",
+                0x0001,
+                ZIP_COMPRESSION_METHOD_STORED,
+                content,
+                content.len() as u32,
+                crc_32,
+            )],
+            b"",
+            false,
+        );
+
+        let mut file: ZipFile = ZipFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+        file.read_data_stream(&data_stream)?;
+
+        let entry: ZipEntry = file.get_entry("secret.bin").unwrap().clone();
+        let mut data: Vec<u8> = vec![0; content.len()];
+        let result: Result<(), ErrorTrace> = file.read_entry_data(&entry, &mut data);
+        assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_entry_data_with_invalid_entry_header() -> Result<(), ErrorTrace> {
+        let content: &[u8] = b"hello";
+        let crc_32: u32 = compute_crc32(content);
+        let mut archive: Vec<u8> = build_test_zip(
+            &[(
+                b"test.txt",
+                0,
+                ZIP_COMPRESSION_METHOD_STORED,
+                content,
+                content.len() as u32,
+                crc_32,
+            )],
+            b"",
+            false,
+        );
+        // Corrupt the local file header signature.
+        archive[0] = 0x00;
+
+        let mut file: ZipFile = ZipFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+        file.read_data_stream(&data_stream)?;
+
+        let entry: ZipEntry = file.get_entry("test.txt").unwrap().clone();
+        let mut data: Vec<u8> = vec![0; content.len()];
+        let result: Result<(), ErrorTrace> = file.read_entry_data(&entry, &mut data);
+        assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_entry_data_with_mismatched_file_name_length() -> Result<(), ErrorTrace> {
+        let content: &[u8] = b"hello";
+        let crc_32: u32 = compute_crc32(content);
+        let mut archive: Vec<u8> = build_test_zip(
+            &[(
+                b"test.txt",
+                0,
+                ZIP_COMPRESSION_METHOD_STORED,
+                content,
+                content.len() as u32,
+                crc_32,
+            )],
+            b"",
+            false,
+        );
+        // Alter the local file header file_name_length field (bytes 26..28).
+        archive[26..28].copy_from_slice(&1u16.to_le_bytes());
+
+        let mut file: ZipFile = ZipFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+        file.read_data_stream(&data_stream)?;
+
+        let entry: ZipEntry = file.get_entry("test.txt").unwrap().clone();
+        let mut data: Vec<u8> = vec![0; content.len()];
+        let result: Result<(), ErrorTrace> = file.read_entry_data(&entry, &mut data);
+        assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_entry_data_with_unsupported_stored_size() -> Result<(), ErrorTrace> {
+        let content: &[u8] = b"hello";
+        let crc_32: u32 = compute_crc32(content);
+        let archive: Vec<u8> = build_test_zip(
+            &[(
+                b"test.txt",
+                0,
+                ZIP_COMPRESSION_METHOD_STORED,
+                content,
+                content.len() as u32,
+                crc_32,
+            )],
+            b"",
+            false,
+        );
+
+        let mut file: ZipFile = ZipFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+        file.read_data_stream(&data_stream)?;
+
+        let entry: ZipEntry = file.get_entry("test.txt").unwrap().clone();
+        let mut data: Vec<u8> = vec![0; 2];
+        let result: Result<(), ErrorTrace> = file.read_entry_data(&entry, &mut data);
+        assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_entry_data_with_unsupported_compression_method() -> Result<(), ErrorTrace> {
+        let content: &[u8] = b"hello";
+        let crc_32: u32 = compute_crc32(content);
+        let archive: Vec<u8> = build_test_zip(
+            &[(b"test.txt", 0, 99, content, content.len() as u32, crc_32)],
+            b"",
+            false,
+        );
+
+        let mut file: ZipFile = ZipFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+        file.read_data_stream(&data_stream)?;
+
+        let entry: ZipEntry = file.get_entry("test.txt").unwrap().clone();
+        let mut data: Vec<u8> = vec![0; content.len()];
+        let result: Result<(), ErrorTrace> = file.read_entry_data(&entry, &mut data);
+        assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_entry_data_with_invalid_deflate_data() -> Result<(), ErrorTrace> {
+        let invalid_deflate: &[u8] = &[0xff, 0xff, 0xff, 0xff];
+        let archive: Vec<u8> = build_test_zip(
+            &[(
+                b"bad.bin",
+                0,
+                ZIP_COMPRESSION_METHOD_DEFLATE,
+                invalid_deflate,
+                4,
+                0,
+            )],
+            b"",
+            false,
+        );
+
+        let mut file: ZipFile = ZipFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+        file.read_data_stream(&data_stream)?;
+
+        let entry: ZipEntry = file.get_entry("bad.bin").unwrap().clone();
+        let mut data: Vec<u8> = vec![0; 4];
+        let result: Result<(), ErrorTrace> = file.read_entry_data(&entry, &mut data);
+        assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_entry_data_with_crc32_mismatch() -> Result<(), ErrorTrace> {
+        let content: &[u8] = b"hello";
+        let archive: Vec<u8> = build_test_zip(
+            &[(
+                b"badcrc.txt",
+                0,
+                ZIP_COMPRESSION_METHOD_STORED,
+                content,
+                content.len() as u32,
+                0xdeadbeef,
+            )],
+            b"",
+            false,
+        );
+
+        let mut file: ZipFile = ZipFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+        file.read_data_stream(&data_stream)?;
+
+        let entry: ZipEntry = file.get_entry("badcrc.txt").unwrap().clone();
+        let mut data: Vec<u8> = vec![0; content.len()];
+        let result: Result<(), ErrorTrace> = file.read_entry_data(&entry, &mut data);
+        assert!(result.is_err());
+
+        Ok(())
+    }
 }

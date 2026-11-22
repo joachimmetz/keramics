@@ -159,4 +159,26 @@ mod tests {
         let result: Result<(), ErrorTrace> = test_struct.read_data(data);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_read_data_with_unsupported_minor_version_value() {
+        let data: &[u8] = b"major=1\nminor=not_a_number\n";
+
+        let mut test_struct: Aff4Version = Aff4Version::new();
+        let result: Result<(), ErrorTrace> = test_struct.read_data(data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_with_blank_lines_and_unknown_key() -> Result<(), ErrorTrace> {
+        let data: &[u8] = b"\n  \nmajor=1\nunknown=ignored\nminor=2\n\n";
+
+        let mut test_struct: Aff4Version = Aff4Version::new();
+        test_struct.read_data(data)?;
+
+        assert_eq!(test_struct.major, 1);
+        assert_eq!(test_struct.minor, 2);
+
+        Ok(())
+    }
 }

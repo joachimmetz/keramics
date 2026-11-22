@@ -58,6 +58,30 @@ impl OsFileResolver {
 }
 
 impl FileResolver for OsFileResolver {
+    /// Retrieves a data stream with the specified path.
+    fn get_data_stream(
+        &self,
+        path_components: &[PathComponent],
+    ) -> Result<Option<DataStreamReference>, ErrorTrace> {
+        let path_buf: PathBuf = self.get_path(path_components);
+
+        // Note that symlink_metadata() is used to prevent traversing symbolic links.
+        match symlink_metadata(&path_buf) {
+            Ok(_) => match open_os_data_stream(&path_buf) {
+                Ok(data_stream) => Ok(Some(data_stream)),
+                Err(mut error) => {
+                    keramics_core::error_trace_add_frame!(error, "Unable to open data stream");
+                    Err(error)
+                }
+            },
+            Err(ref error) if error.kind() == ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(keramics_core::error_trace_new_with_error!(
+                "Unable to determine if data stream exists",
+                error
+            )),
+        }
+    }
+
     /// Retrieves the names of the files stored in the directory with the specified path.
     fn list_file_names(
         &self,
@@ -84,30 +108,6 @@ impl FileResolver for OsFileResolver {
         }
         Ok(file_names)
     }
-
-    /// Retrieves a data stream with the specified path.
-    fn get_data_stream(
-        &self,
-        path_components: &[PathComponent],
-    ) -> Result<Option<DataStreamReference>, ErrorTrace> {
-        let path_buf: PathBuf = self.get_path(path_components);
-
-        // Note that symlink_metadata() is used to prevent traversing symbolic links.
-        match symlink_metadata(&path_buf) {
-            Ok(_) => match open_os_data_stream(&path_buf) {
-                Ok(data_stream) => Ok(Some(data_stream)),
-                Err(mut error) => {
-                    keramics_core::error_trace_add_frame!(error, "Unable to open data stream");
-                    Err(error)
-                }
-            },
-            Err(ref error) if error.kind() == ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(keramics_core::error_trace_new_with_error!(
-                "Unable to determine if data stream exists",
-                error
-            )),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -131,6 +131,31 @@ mod tests {
         let data_stream: Option<DataStreamReference> =
             file_resolver.get_data_stream(&path_components)?;
         assert!(data_stream.is_some());
+
+        let path_components: [PathComponent; 2] = [
+            PathComponent::from("directory"),
+            PathComponent::from("missing.txt"),
+        ];
+        let data_stream: Option<DataStreamReference> =
+            file_resolver.get_data_stream(&path_components)?;
+        assert!(data_stream.is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_list_file_names() -> Result<(), ErrorTrace> {
+        let path_string: String = get_test_data_path("");
+        let path_buf: PathBuf = PathBuf::from(path_string.as_str());
+        let file_resolver: OsFileResolver = OsFileResolver::new(path_buf);
+
+        let path_components: [PathComponent; 1] = [PathComponent::from("directory")];
+        let file_names: Vec<String> = file_resolver.list_file_names(&path_components)?;
+        assert!(file_names.contains(&"file.txt".to_string()));
+
+        let path_components: [PathComponent; 1] = [PathComponent::from("missing_directory")];
+        let file_names: Vec<String> = file_resolver.list_file_names(&path_components)?;
+        assert!(file_names.is_empty());
 
         Ok(())
     }

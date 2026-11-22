@@ -160,6 +160,29 @@ mod tests {
     }
 
     #[test]
+    fn test_list_file_names() -> Result<(), ErrorTrace> {
+        let file_system: VfsFileSystemReference =
+            VfsFileSystemReference::new(VfsFileSystem::new(&VfsType::Os));
+        let path: Path = Path::from("../test_data");
+        let file_resolver: FileResolverReference = new_vfs_file_resolver(&file_system, path)?;
+
+        let path_components: [PathComponent; 1] = [PathComponent::from("directory")];
+        let file_names: Vec<String> = file_resolver.list_file_names(&path_components)?;
+        assert!(file_names.contains(&"file.txt".to_string()));
+
+        let path_components: [PathComponent; 1] = [PathComponent::from("missing_directory")];
+        let file_names: Vec<String> = file_resolver.list_file_names(&path_components)?;
+        assert!(file_names.is_empty());
+
+        let invalid_component: PathComponent = PathComponent::from("invalid\0name");
+        let result: Result<Vec<String>, ErrorTrace> =
+            file_resolver.list_file_names(&[invalid_component]);
+        assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[test]
     fn test_new_vfs_file_resolver() -> Result<(), ErrorTrace> {
         let file_system: VfsFileSystemReference =
             VfsFileSystemReference::new(VfsFileSystem::new(&VfsType::Os));

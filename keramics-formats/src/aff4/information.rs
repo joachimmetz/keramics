@@ -257,16 +257,16 @@ impl Aff4Information {
     fn predicate_local_name(predicate: &str) -> String {
         if predicate.starts_with('<') && predicate.ends_with('>') {
             let iri: &str = &predicate[1..predicate.len() - 1];
-            if let Some(hash_pos) = iri.rfind('#') {
-                return iri[hash_pos + 1..].to_string();
+            if let Some(hash_index) = iri.rfind('#') {
+                return iri[hash_index + 1..].to_string();
             }
-            if let Some(slash_pos) = iri.rfind('/') {
-                return iri[slash_pos + 1..].to_string();
+            if let Some(slash_index) = iri.rfind('/') {
+                return iri[slash_index + 1..].to_string();
             }
             return iri.to_string();
         }
-        if let Some(colon_pos) = predicate.rfind(':') {
-            return predicate[colon_pos + 1..].to_string();
+        if let Some(colon_index) = predicate.rfind(':') {
+            return predicate[colon_index + 1..].to_string();
         }
         predicate.to_string()
     }
@@ -355,13 +355,13 @@ impl Aff4Information {
         let mut index: usize = 0;
 
         while index < chars.len() {
-            let ch: char = chars[index];
+            let character: char = chars[index];
 
-            if ch.is_whitespace() {
+            if character.is_whitespace() {
                 index += 1;
                 continue;
             }
-            match ch {
+            match character {
                 '<' => {
                     let start: usize = index;
                     index += 1;
@@ -403,7 +403,7 @@ impl Aff4Information {
                     tokens.push(value);
                 }
                 ';' | '.' | ',' | '(' | ')' => {
-                    tokens.push(ch.to_string());
+                    tokens.push(character.to_string());
                     index += 1;
                 }
                 _ => {
@@ -638,5 +638,45 @@ mod tests {
         assert!(standard_test_struct.is_standard());
 
         Ok(())
+    }
+
+    #[test]
+    fn test_node_property_and_predicate_helpers() -> Result<(), ErrorTrace> {
+        let data: &[u8] = concat!(
+            "@prefix : <aff4://volume> .\n",
+            "@prefix ex: <http://example.org/> .\n",
+            "<aff4://node1>\n",
+            "    <http://example.org/schema#hashProp> ( \"first\" , \"second\" ) ;\n",
+            "    <http://example.org/slashProp> \"value\" ;\n",
+            "    <plainProp> \"plain\" ;\n",
+            "    bareProp \"bare\" .\n"
+        )
+        .as_bytes();
+
+        let mut test_struct: Aff4Information = Aff4Information::new();
+        test_struct.read_data(data)?;
+
+        assert_eq!(test_struct.nodes.len(), 1);
+        let node: &Aff4Node = &test_struct.nodes[0];
+
+        let hash_property: &Aff4NodeProperty = node.get_property("hashProp").unwrap();
+        assert_eq!(hash_property.get_value_by_index(0), Some("first"));
+        assert_eq!(hash_property.get_value_by_index(1), Some("second"));
+        assert_eq!(hash_property.get_value_by_index(2), None);
+        assert_eq!(node.get_property_value("slashProp"), Some("value"));
+        assert_eq!(node.get_property_value("plainProp"), Some("plain"));
+        assert_eq!(node.get_property_value("bareProp"), Some("bare"));
+        assert_eq!(node.get_property_values("missing"), None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_tokenize_with_unclosed_tokens() {
+        let tokens: Vec<String> = Aff4Information::tokenize("<aff4://unclosed");
+        assert!(tokens.is_empty());
+
+        let tokens: Vec<String> = Aff4Information::tokenize("<aff4://node> a \"unclosed");
+        assert_eq!(tokens, vec!["<aff4://node>".to_string(), "a".to_string()]);
     }
 }

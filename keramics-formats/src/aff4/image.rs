@@ -198,7 +198,7 @@ impl Aff4Image {
         &self.name
     }
 
-    /// Determines the number of images stored in the volume.
+    /// Retrieves the number of images stored in the volume.
     pub fn get_number_of_images(&self) -> usize {
         self.image_entry_names.len()
     }
@@ -386,6 +386,13 @@ mod tests {
         zip_file.read_entry_data(&entry, &mut data)?;
 
         Ok(data)
+    }
+
+    #[test]
+    fn test_default() {
+        let image: Aff4Image = Aff4Image::default();
+        assert_eq!(image.get_media_size(), 0);
+        assert_eq!(image.get_number_of_images(), 0);
     }
 
     #[test]
@@ -584,6 +591,27 @@ mod tests {
         assert_eq!(data.len(), entry_data.len());
         assert_eq!(data, entry_data);
 
+        assert_eq!(image.get_media_size_by_index(0), Some(12582912));
+        assert_eq!(image.get_media_size_by_index(1), None);
+        assert!(image.get_data_stream_by_index(1).is_err());
+
+        let default_data_stream: DataStreamReference = image.get_data_stream();
+        assert_eq!(
+            keramics_core::data_stream_get_size!(default_data_stream),
+            12582912
+        );
+
         Ok(())
+    }
+
+    #[test]
+    fn test_open_with_missing_file() {
+        let mut image: Aff4Image = Aff4Image::new();
+        let file_resolver: FileResolverReference =
+            FileResolverReference::new(Box::new(FakeFileResolver::new()));
+        let file_name: PathComponent = PathComponent::from("missing.aff4");
+
+        let result: Result<(), ErrorTrace> = image.open(&file_resolver, &file_name);
+        assert!(result.is_err());
     }
 }

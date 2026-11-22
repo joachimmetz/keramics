@@ -302,9 +302,72 @@ mod tests {
 
     use std::path::PathBuf;
 
-    use crate::os_file_resolver::OsFileResolver;
+    use keramics_checksums::ReversedCrc32Context;
+    use keramics_core::open_fake_data_stream;
 
+    use crate::fake_file_resolver::FakeFileResolver;
+    use crate::os_file_resolver::OsFileResolver;
     use crate::tests::get_test_data_path;
+
+    fn build_test_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut archive: Vec<u8> = Vec::new();
+        let mut central_directory: Vec<u8> = Vec::new();
+
+        for (file_name, data) in entries {
+            let local_header_offset: u32 = archive.len() as u32;
+            let file_name_bytes: &[u8] = file_name.as_bytes();
+            let mut crc32_context: ReversedCrc32Context = ReversedCrc32Context::new(0xedb88320, 0);
+            crc32_context.update(data);
+            let crc_32: u32 = crc32_context.finalize();
+
+            archive.extend_from_slice(&[0x50, 0x4b, 0x03, 0x04]);
+            archive.extend_from_slice(&20u16.to_le_bytes());
+            archive.extend_from_slice(&0u16.to_le_bytes());
+            archive.extend_from_slice(&0u16.to_le_bytes());
+            archive.extend_from_slice(&0u16.to_le_bytes());
+            archive.extend_from_slice(&0u16.to_le_bytes());
+            archive.extend_from_slice(&crc_32.to_le_bytes());
+            archive.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            archive.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            archive.extend_from_slice(&(file_name_bytes.len() as u16).to_le_bytes());
+            archive.extend_from_slice(&0u16.to_le_bytes());
+            archive.extend_from_slice(file_name_bytes);
+            archive.extend_from_slice(data);
+
+            central_directory.extend_from_slice(&[0x50, 0x4b, 0x01, 0x02]);
+            central_directory.extend_from_slice(&20u16.to_le_bytes());
+            central_directory.extend_from_slice(&20u16.to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&crc_32.to_le_bytes());
+            central_directory.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            central_directory.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            central_directory.extend_from_slice(&(file_name_bytes.len() as u16).to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&0u32.to_le_bytes());
+            central_directory.extend_from_slice(&local_header_offset.to_le_bytes());
+            central_directory.extend_from_slice(file_name_bytes);
+        }
+        let central_directory_offset: u32 = archive.len() as u32;
+        let central_directory_size: u32 = central_directory.len() as u32;
+        archive.extend_from_slice(&central_directory);
+
+        archive.extend_from_slice(&[0x50, 0x4b, 0x05, 0x06]);
+        archive.extend_from_slice(&0u16.to_le_bytes());
+        archive.extend_from_slice(&0u16.to_le_bytes());
+        archive.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+        archive.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+        archive.extend_from_slice(&central_directory_size.to_le_bytes());
+        archive.extend_from_slice(&central_directory_offset.to_le_bytes());
+        archive.extend_from_slice(&0u16.to_le_bytes());
+
+        archive
+    }
 
     fn get_file() -> Result<Aff4File, ErrorTrace> {
         let mut file: Aff4File = Aff4File::new();
@@ -384,5 +447,150 @@ mod tests {
         assert!(zip_file.get_entry("test_data/missing.raw").is_none());
 
         Ok(())
+    }
+
+    #[test]
+    fn test_open_with_missing_file() {
+        let mut file: Aff4File = Aff4File::new();
+        let file_resolver: FileResolverReference =
+            FileResolverReference::new(Box::new(FakeFileResolver::new()));
+        let file_name: PathComponent = PathComponent::from("missing.aff4");
+
+        let result: Result<(), ErrorTrace> = file.open(&file_resolver, &file_name);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_invalid_zip() {
+        let mut file: Aff4File = Aff4File::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(b"not a zip");
+
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_missing_version() {
+        let archive: Vec<u8> = build_test_zip(&[]);
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+
+        let mut file: Aff4File = Aff4File::new();
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_invalid_version() {
+        let archive: Vec<u8> = build_test_zip(&[(AFF4_VERSION_FILE_NAME, b"invalid")]);
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+
+        let mut file: Aff4File = Aff4File::new();
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_unsupported_version() {
+        let archive: Vec<u8> = build_test_zip(&[(AFF4_VERSION_FILE_NAME, b"major=2\nminor=0\n")]);
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+
+        let mut file: Aff4File = Aff4File::new();
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_missing_container_description() {
+        let archive: Vec<u8> = build_test_zip(&[(AFF4_VERSION_FILE_NAME, b"major=1\nminor=0\n")]);
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+
+        let mut file: Aff4File = Aff4File::new();
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_invalid_container_description_encoding() {
+        let archive: Vec<u8> = build_test_zip(&[
+            (AFF4_VERSION_FILE_NAME, b"major=1\nminor=0\n"),
+            (AFF4_CONTAINER_DESCRIPTION_FILE_NAME, &[0xff, 0xfe]),
+        ]);
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+
+        let mut file: Aff4File = Aff4File::new();
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_missing_information() {
+        let archive: Vec<u8> = build_test_zip(&[
+            (AFF4_VERSION_FILE_NAME, b"major=1\nminor=0\n"),
+            (AFF4_CONTAINER_DESCRIPTION_FILE_NAME, b"aff4://test\n"),
+        ]);
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+
+        let mut file: Aff4File = Aff4File::new();
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_invalid_information() {
+        let archive: Vec<u8> = build_test_zip(&[
+            (AFF4_VERSION_FILE_NAME, b"major=1\nminor=0\n"),
+            (AFF4_CONTAINER_DESCRIPTION_FILE_NAME, b"aff4://test\n"),
+            (AFF4_INFORMATION_FILE_NAME, b"@base invalid .\n"),
+        ]);
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+
+        let mut file: Aff4File = Aff4File::new();
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_missing_volume_uri() {
+        let archive: Vec<u8> = build_test_zip(&[
+            (AFF4_VERSION_FILE_NAME, b"major=1\nminor=0\n"),
+            (AFF4_CONTAINER_DESCRIPTION_FILE_NAME, b"aff4://test\n"),
+            (AFF4_INFORMATION_FILE_NAME, b"</image.raw> a aff4:Image .\n"),
+        ]);
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+
+        let mut file: Aff4File = Aff4File::new();
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_missing_image_entry_in_information() {
+        let archive: Vec<u8> = build_test_zip(&[
+            (AFF4_VERSION_FILE_NAME, b"major=1\nminor=0\n"),
+            (AFF4_CONTAINER_DESCRIPTION_FILE_NAME, b"aff4://test\n"),
+            (AFF4_INFORMATION_FILE_NAME, b"@base <aff4://test> .\n"),
+        ]);
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+
+        let mut file: Aff4File = Aff4File::new();
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_missing_image_entry_in_volume() {
+        let archive: Vec<u8> = build_test_zip(&[
+            (AFF4_VERSION_FILE_NAME, b"major=1\nminor=0\n"),
+            (AFF4_CONTAINER_DESCRIPTION_FILE_NAME, b"aff4://test\n"),
+            (
+                AFF4_INFORMATION_FILE_NAME,
+                b"@base <aff4://test> .\n</missing.raw> a aff4:Image .\n",
+            ),
+        ]);
+        let data_stream: DataStreamReference = open_fake_data_stream(&archive);
+
+        let mut file: Aff4File = Aff4File::new();
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
     }
 }

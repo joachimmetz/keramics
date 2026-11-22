@@ -96,17 +96,17 @@ impl AffImage {
         &self.name
     }
 
-    /// Determines the number of bad sectors.
+    /// Retrieves the number of bad sectors.
     pub fn get_number_of_bad_sectors(&self) -> u64 {
         self.aff_file.get_number_of_bad_sectors()
     }
 
-    /// Determines the number of stored pages of the image.
+    /// Retrieves the number of stored pages of the image.
     pub fn get_number_of_pages(&self) -> usize {
         self.number_of_pages
     }
 
-    /// Determines the number of segments of the image.
+    /// Retrieves the number of segments of the image.
     pub fn get_number_of_segments(&self) -> usize {
         self.aff_file.get_number_of_segments()
     }
@@ -213,6 +213,13 @@ mod tests {
         );
 
         Ok(data)
+    }
+
+    #[test]
+    fn test_default() {
+        let image: AffImage = AffImage::default();
+        assert_eq!(image.get_media_size(), 0);
+        assert_eq!(image.get_bytes_per_sector(), AFF_DEFAULT_BYTES_PER_SECTOR);
     }
 
     #[test]

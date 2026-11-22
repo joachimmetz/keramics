@@ -191,7 +191,6 @@ mod tests {
 
     use crate::enums::{VfsFileType, VfsType};
     use crate::file_system::VfsFileSystem;
-
     use crate::tests::get_test_data_path;
 
     fn get_file_system() -> Result<Aff4FileSystem, ErrorTrace> {
@@ -269,6 +268,22 @@ mod tests {
         let result: Option<Aff4FileEntry> = aff4_file_system.get_file_entry_by_path(&path)?;
         assert!(result.is_none());
 
+        let path: Path = Path::from("aff4.s1");
+        let result: Option<Aff4FileEntry> = aff4_file_system.get_file_entry_by_path(&path)?;
+        assert!(result.is_none());
+
+        let path: Path = Path::from("/aff4.s1/bogus");
+        let result: Option<Aff4FileEntry> = aff4_file_system.get_file_entry_by_path(&path)?;
+        assert!(result.is_none());
+
+        let path: Path = Path::from("/aff4.s0");
+        let result: Option<Aff4FileEntry> = aff4_file_system.get_file_entry_by_path(&path)?;
+        assert!(result.is_none());
+
+        let path: Path = Path::from("/aff4.s99");
+        let result: Option<Aff4FileEntry> = aff4_file_system.get_file_entry_by_path(&path)?;
+        assert!(result.is_none());
+
         Ok(())
     }
 
@@ -295,5 +310,25 @@ mod tests {
         assert_eq!(aff4_file_system.number_of_streams, 1);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_open_with_errors() {
+        let mut aff4_file_system: Aff4FileSystem = Aff4FileSystem::new();
+        let vfs_location: VfsLocation = VfsLocation::from("/missing.aff4");
+
+        let result: Result<(), ErrorTrace> = aff4_file_system.open(None, &vfs_location);
+        assert!(result.is_err());
+
+        let parent_file_system: VfsFileSystemReference =
+            VfsFileSystemReference::new(VfsFileSystem::new(&VfsType::Os));
+        let result: Result<(), ErrorTrace> =
+            aff4_file_system.open(Some(&parent_file_system), &vfs_location);
+        assert!(result.is_err());
+
+        let root_location: VfsLocation = VfsLocation::from("/");
+        let result: Result<(), ErrorTrace> =
+            aff4_file_system.open(Some(&parent_file_system), &root_location);
+        assert!(result.is_err());
     }
 }

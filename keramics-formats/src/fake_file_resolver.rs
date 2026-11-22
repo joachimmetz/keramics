@@ -51,4 +51,14 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_list_file_names() -> Result<(), ErrorTrace> {
+        let file_resolver: FakeFileResolver = FakeFileResolver::new();
+
+        let file_names: Vec<String> = file_resolver.list_file_names(&[])?;
+        assert!(file_names.is_empty());
+
+        Ok(())
+    }
 }

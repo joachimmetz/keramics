@@ -142,7 +142,26 @@ mod tests {
         }
     }
 
-    // TODO: add tests for get_data_stream
+    #[test]
+    fn test_get_data_stream() -> Result<(), ErrorTrace> {
+        let test_image: Arc<AffImage> = get_image()?;
+
+        let file_entry: AffFileEntry = get_root_file_entry(&test_image);
+
+        let data_stream: Option<DataStreamReference> = file_entry.get_data_stream()?;
+        assert!(data_stream.is_none());
+
+        let file_entry: AffFileEntry = get_layer_file_entry(&test_image)?;
+
+        let data_stream: Option<DataStreamReference> = file_entry.get_data_stream()?;
+        assert!(data_stream.is_some());
+        assert_eq!(
+            keramics_core::data_stream_get_size!(data_stream.unwrap()),
+            4194304
+        );
+
+        Ok(())
+    }
 
     #[test]
     fn test_get_file_type() -> Result<(), ErrorTrace> {
@@ -224,6 +243,10 @@ mod tests {
         assert_eq!(name, PathComponent::from("aff1"));
 
         let result: Result<AffFileEntry, ErrorTrace> = file_entry.get_sub_file_entry_by_index(99);
+        assert!(result.is_err());
+
+        let file_entry: AffFileEntry = get_layer_file_entry(&test_image)?;
+        let result: Result<AffFileEntry, ErrorTrace> = file_entry.get_sub_file_entry_by_index(0);
         assert!(result.is_err());
 
         Ok(())

@@ -36,7 +36,7 @@ const AFF4_STANDARD_BEVY_INDEX_ENTRY_SIZE: usize = 12;
 const AFF4_STANDARD_CHUNK_CACHE_SIZE: usize = 64;
 
 /// Maximum number of bevy segments probed for streams without a declared size.
-const AFF4_STANDARD_MAX_SEGMENTS: usize = 16384;
+const AFF4_STANDARD_MAXIMUM_NUMBER_OF_SEGMENTS: usize = 16384;
 
 /// Default number of chunks per bevy segment.
 const AFF4_STANDARD_DEFAULT_CHUNKS_IN_SEGMENT: usize = 1024;
@@ -396,7 +396,7 @@ impl Aff4StandardMedia {
         // example `Striped/Base-Linear_1.aff4` results in the directory
         // `Striped` and the base file name `Base-Linear_1.aff4`.
         let directory: String = match primary_file_name.rfind('/') {
-            Some(pos) if pos > 0 => primary_file_name[..pos].to_string(),
+            Some(slash_index) if slash_index > 0 => primary_file_name[..slash_index].to_string(),
             _ => String::new(),
         };
         let base_file_name: String = primary_file_name
@@ -879,8 +879,9 @@ impl Aff4StandardMedia {
         {
             return Some(MapTarget::Gap);
         }
-        if let Some(symbolic_pos) = lowercased.find("symbolicstream") {
-            let symbolic_value: &str = lowercased[(symbolic_pos + "symbolicstream".len())..].trim();
+        if let Some(symbolic_index) = lowercased.find("symbolicstream") {
+            let symbolic_value: &str =
+                lowercased[(symbolic_index + "symbolicstream".len())..].trim();
             if !symbolic_value.is_empty() {
                 if let Some(byte) = u8::from_str_radix(symbolic_value, 16).ok() {
                     return Some(MapTarget::Symbolic(byte));
@@ -976,7 +977,7 @@ impl Aff4StandardMedia {
 
                     let mut segments_read: usize = 0;
                     loop {
-                        if segments_read >= AFF4_STANDARD_MAX_SEGMENTS {
+                        if segments_read >= AFF4_STANDARD_MAXIMUM_NUMBER_OF_SEGMENTS {
                             break;
                         }
                         let first_chunk_index: usize = segments_read * chunks_in_segment;
@@ -1066,10 +1067,10 @@ impl Aff4StandardMedia {
             return String::new();
         }
         if let Some(rest) = subject.strip_prefix("aff4://") {
-            if let Some(slash_pos) = rest.find('/') {
-                let prefix: &str = &rest[..slash_pos];
+            if let Some(slash_index) = rest.find('/') {
+                let prefix: &str = &rest[..slash_index];
                 if prefix.len() == 36 {
-                    return rest[slash_pos + 1..].to_string();
+                    return rest[slash_index + 1..].to_string();
                 }
             }
             return rest.to_string();
@@ -1091,9 +1092,9 @@ impl Aff4StandardMedia {
             if !candidates.contains(&rest) {
                 candidates.push(rest.clone());
             }
-            if let Some(slash_pos) = rest.find('/') {
-                if rest[..slash_pos].len() == 36 {
-                    rest = rest[slash_pos + 1..].to_string();
+            if let Some(slash_index) = rest.find('/') {
+                if rest[..slash_index].len() == 36 {
+                    rest = rest[slash_index + 1..].to_string();
                     if !candidates.contains(&rest) {
                         candidates.push(rest);
                     }
@@ -1557,3 +1558,782 @@ impl BlockReader for Aff4StandardReader {
 
 /// Advanced Forensic Format 4 (AFF4) Standard media block stream.
 pub type Aff4StandardBlockStream = crate::block_stream::BlockStream<Aff4StandardReader>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::collections::HashMap;
+
+    use keramics_checksums::ReversedCrc32Context;
+    use keramics_core::{DataStreamReference, open_fake_data_stream};
+
+    use crate::file_resolver::FileResolver;
+
+    struct MemoryFileResolver {
+        files: HashMap<String, Vec<u8>>,
+    }
+
+    impl MemoryFileResolver {
+        fn new(files: Vec<(&str, Vec<u8>)>) -> Self {
+            let mut file_map: HashMap<String, Vec<u8>> = HashMap::new();
+            for (name, data) in files {
+                file_map.insert(name.to_string(), data);
+            }
+            Self { files: file_map }
+        }
+    }
+
+    impl FileResolver for MemoryFileResolver {
+        fn get_data_stream(
+            &self,
+            path_components: &[PathComponent],
+        ) -> Result<Option<DataStreamReference>, ErrorTrace> {
+            let path: String = path_components
+                .iter()
+                .map(|component| component.to_string())
+                .collect::<Vec<String>>()
+                .join("/");
+            match self.files.get(&path) {
+                Some(data) => Ok(Some(open_fake_data_stream(data))),
+                None => Ok(None),
+            }
+        }
+
+        fn list_file_names(
+            &self,
+            path_components: &[PathComponent],
+        ) -> Result<Vec<String>, ErrorTrace> {
+            let prefix: String = if path_components.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "{}/",
+                    path_components
+                        .iter()
+                        .map(|component| component.to_string())
+                        .collect::<Vec<String>>()
+                        .join("/")
+                )
+            };
+            let mut file_names: Vec<String> = Vec::new();
+            for key in self.files.keys() {
+                if let Some(rest) = key.strip_prefix(&prefix) {
+                    if !rest.contains('/') {
+                        file_names.push(rest.to_string());
+                    }
+                }
+            }
+            file_names.sort();
+            Ok(file_names)
+        }
+    }
+
+    fn build_bevy_index(entries: &[(u64, u32)]) -> Vec<u8> {
+        let mut data: Vec<u8> = Vec::new();
+        for (bevy_offset, stored_size) in entries {
+            data.extend_from_slice(&bevy_offset.to_le_bytes());
+            data.extend_from_slice(&stored_size.to_le_bytes());
+        }
+        data
+    }
+
+    fn build_map_entries(entries: &[(u64, u64, u64, i32)]) -> Vec<u8> {
+        let mut data: Vec<u8> = Vec::new();
+        for (mapped_offset, length, target_offset, target_index) in entries {
+            data.extend_from_slice(&mapped_offset.to_le_bytes());
+            data.extend_from_slice(&length.to_le_bytes());
+            data.extend_from_slice(&target_offset.to_le_bytes());
+            data.extend_from_slice(&target_index.to_le_bytes());
+        }
+        data
+    }
+
+    fn build_test_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut archive: Vec<u8> = Vec::new();
+        let mut central_directory: Vec<u8> = Vec::new();
+
+        for (file_name, data) in entries {
+            let local_header_offset: u32 = archive.len() as u32;
+            let file_name_bytes: &[u8] = file_name.as_bytes();
+            let mut crc32_context: ReversedCrc32Context = ReversedCrc32Context::new(0xedb88320, 0);
+            crc32_context.update(data);
+            let crc_32: u32 = crc32_context.finalize();
+
+            archive.extend_from_slice(&[0x50, 0x4b, 0x03, 0x04]);
+            archive.extend_from_slice(&20u16.to_le_bytes());
+            archive.extend_from_slice(&0u16.to_le_bytes());
+            archive.extend_from_slice(&0u16.to_le_bytes());
+            archive.extend_from_slice(&0u16.to_le_bytes());
+            archive.extend_from_slice(&0u16.to_le_bytes());
+            archive.extend_from_slice(&crc_32.to_le_bytes());
+            archive.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            archive.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            archive.extend_from_slice(&(file_name_bytes.len() as u16).to_le_bytes());
+            archive.extend_from_slice(&0u16.to_le_bytes());
+            archive.extend_from_slice(file_name_bytes);
+            archive.extend_from_slice(data);
+
+            central_directory.extend_from_slice(&[0x50, 0x4b, 0x01, 0x02]);
+            central_directory.extend_from_slice(&20u16.to_le_bytes());
+            central_directory.extend_from_slice(&20u16.to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&crc_32.to_le_bytes());
+            central_directory.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            central_directory.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            central_directory.extend_from_slice(&(file_name_bytes.len() as u16).to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&0u32.to_le_bytes());
+            central_directory.extend_from_slice(&local_header_offset.to_le_bytes());
+            central_directory.extend_from_slice(file_name_bytes);
+        }
+        let central_directory_offset: u32 = archive.len() as u32;
+        let central_directory_size: u32 = central_directory.len() as u32;
+        archive.extend_from_slice(&central_directory);
+
+        archive.extend_from_slice(&[0x50, 0x4b, 0x05, 0x06]);
+        archive.extend_from_slice(&0u16.to_le_bytes());
+        archive.extend_from_slice(&0u16.to_le_bytes());
+        archive.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+        archive.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+        archive.extend_from_slice(&central_directory_size.to_le_bytes());
+        archive.extend_from_slice(&central_directory_offset.to_le_bytes());
+        archive.extend_from_slice(&0u16.to_le_bytes());
+
+        archive
+    }
+
+    fn get_deflate_chunk_16(fill_byte: u8) -> Vec<u8> {
+        let mut data: Vec<u8> = vec![0x01, 0x10, 0x00, 0xef, 0xff];
+        data.extend_from_slice(&[fill_byte; 16]);
+        data
+    }
+
+    fn get_snappy_chunk_16(fill_byte: u8) -> Vec<u8> {
+        // Uncompressed size = 16, 1-byte literal of fill_byte, copy2 of 15 bytes at offset 1.
+        vec![0x10, 0x00, fill_byte, 0x3a, 0x01, 0x00]
+    }
+
+    fn get_zlib_chunk_16_0x44() -> Vec<u8> {
+        let mut data: Vec<u8> = vec![0x78, 0x01];
+        data.extend_from_slice(&get_deflate_chunk_16(0x44));
+        // Adler-32 of 16 bytes of 0x44 (s1 = 0x0441, s2 = 0x2430).
+        data.extend_from_slice(&[0x24, 0x30, 0x04, 0x41]);
+        data
+    }
+
+    #[test]
+    fn test_compression_method_from_iri() {
+        assert_eq!(
+            CompressionMethod::from_iri("http://code.google.com/p/snappy/"),
+            CompressionMethod::Snappy
+        );
+        assert_eq!(
+            CompressionMethod::from_iri("https://www.ietf.org/rfc/rfc1950.txt"),
+            CompressionMethod::Zlib
+        );
+        assert_eq!(
+            CompressionMethod::from_iri("http://aff4.org/Schema#zlib"),
+            CompressionMethod::Zlib
+        );
+        assert_eq!(
+            CompressionMethod::from_iri("https://www.ietf.org/rfc/rfc1951.txt"),
+            CompressionMethod::Deflate
+        );
+        assert_eq!(
+            CompressionMethod::from_iri("http://aff4.org/Schema#deflate"),
+            CompressionMethod::Deflate
+        );
+        assert_eq!(
+            CompressionMethod::from_iri("http://aff4.org/Schema#NullCompressor"),
+            CompressionMethod::Stored
+        );
+    }
+
+    #[test]
+    fn test_is_split_companion_name() {
+        assert!(Aff4StandardMedia::is_split_companion_name(
+            "split.aff4.A01",
+            "split.aff4"
+        ));
+        assert!(Aff4StandardMedia::is_split_companion_name(
+            "split.aff4.A32",
+            "split.aff4"
+        ));
+        assert!(!Aff4StandardMedia::is_split_companion_name(
+            "split.aff4.A00",
+            "split.aff4"
+        ));
+        assert!(!Aff4StandardMedia::is_split_companion_name(
+            "split.aff4.A33",
+            "split.aff4"
+        ));
+        assert!(!Aff4StandardMedia::is_split_companion_name(
+            "split.aff4.Axx",
+            "split.aff4"
+        ));
+        assert!(!Aff4StandardMedia::is_split_companion_name(
+            "other.aff4.A01",
+            "split.aff4"
+        ));
+    }
+
+    #[test]
+    fn test_stream_identity_and_name_candidates() {
+        assert_eq!(Aff4StandardMedia::stream_identity(""), "");
+        assert_eq!(Aff4StandardMedia::stream_identity(":"), "");
+        assert_eq!(
+            Aff4StandardMedia::stream_identity(
+                "aff4://00000000-0000-1003-8000-000000000001/stream.raw"
+            ),
+            "stream.raw"
+        );
+        assert_eq!(
+            Aff4StandardMedia::stream_identity("aff4://00000000-0000-1003-8000-000000000001"),
+            "00000000-0000-1003-8000-000000000001"
+        );
+        assert_eq!(
+            Aff4StandardMedia::stream_identity("/local/stream"),
+            "/local/stream"
+        );
+
+        assert!(Aff4StandardMedia::stream_name_candidates("").is_empty());
+        assert!(Aff4StandardMedia::stream_name_candidates(":").is_empty());
+        let candidates: Vec<String> = Aff4StandardMedia::stream_name_candidates(
+            "aff4://00000000-0000-1003-8000-000000000001/stream.raw",
+        );
+        assert_eq!(candidates.len(), 3);
+        assert_eq!(candidates[2], "stream.raw");
+    }
+
+    #[test]
+    fn test_resolve_map_target() {
+        let stream_identities: Vec<String> =
+            vec!["00000000-0000-1003-8000-000000000001".to_string()];
+
+        assert_eq!(
+            Aff4StandardMedia::resolve_map_target("Zero", &stream_identities),
+            Some(MapTarget::Gap)
+        );
+        assert_eq!(
+            Aff4StandardMedia::resolve_map_target("aff4:Zero", &stream_identities),
+            Some(MapTarget::Gap)
+        );
+        assert_eq!(
+            Aff4StandardMedia::resolve_map_target("aff4://Zero", &stream_identities),
+            Some(MapTarget::Gap)
+        );
+        assert_eq!(
+            Aff4StandardMedia::resolve_map_target(
+                "http://aff4.org/Schema#UnknownData",
+                &stream_identities
+            ),
+            Some(MapTarget::Gap)
+        );
+        assert_eq!(
+            Aff4StandardMedia::resolve_map_target(
+                "http://aff4.org/Schema#UnreadableData",
+                &stream_identities
+            ),
+            Some(MapTarget::Gap)
+        );
+        assert_eq!(
+            Aff4StandardMedia::resolve_map_target(
+                "http://aff4.org/Schema#SymbolicStreamAA",
+                &stream_identities
+            ),
+            Some(MapTarget::Symbolic(0xaa))
+        );
+        assert_eq!(
+            Aff4StandardMedia::resolve_map_target(
+                "http://aff4.org/Schema#SymbolicStreamZZ",
+                &stream_identities
+            ),
+            None
+        );
+        assert_eq!(
+            Aff4StandardMedia::resolve_map_target(
+                "aff4://00000000-0000-1003-8000-000000000001",
+                &stream_identities
+            ),
+            Some(MapTarget::Stream(0))
+        );
+        assert_eq!(
+            Aff4StandardMedia::resolve_map_target("aff4://unknown", &stream_identities),
+            None
+        );
+    }
+
+    #[test]
+    fn test_data_volume_helpers() -> Result<(), ErrorTrace> {
+        assert_eq!(
+            DataVolume::percent_encode("aff4://a/b", false),
+            "aff4%3A%2F%2Fa%2Fb"
+        );
+        assert_eq!(
+            DataVolume::percent_encode("file:/tmp/a.raw", true),
+            "file%3A/tmp/a.raw"
+        );
+
+        let candidates: Vec<String> = DataVolume::entry_prefix_candidates("aff4://a/b");
+        assert_eq!(candidates.len(), 3);
+
+        let turtle: &[u8] = b"@prefix : <aff4://vol> .\n<aff4://stream> a aff4:ImageStream .\n";
+        let archive: Vec<u8> = build_test_zip(&[
+            ("version.txt", b"major=1\nminor=0\n"),
+            ("container.description", b"aff4://vol\n"),
+            ("information.turtle", turtle),
+            ("sample.bin", b"12345"),
+        ]);
+        let resolver: FileResolverReference = FileResolverReference::new(Box::new(
+            MemoryFileResolver::new(vec![("vol.aff4", archive)]),
+        ));
+        let volume: DataVolume = DataVolume::open(&resolver, &PathComponent::from("vol.aff4"))?;
+
+        assert_eq!(volume.get_entry_size("sample.bin"), Some(5));
+        assert_eq!(volume.get_entry_size("missing.bin"), None);
+        assert!(volume.read_entry_data("missing.bin").is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_open_and_read_mapped_snappy_image() -> Result<(), ErrorTrace> {
+        let stream_iri: &str = "aff4://00000000-0000-1003-8000-000000000001";
+        let map_iri: &str = "aff4://00000000-0000-1003-8000-000000000002";
+        let image_iri: &str = "aff4://00000000-0000-1003-8000-000000000003";
+        let volume_iri: &str = "aff4://00000000-0000-1003-8000-000000000004";
+
+        let snappy_chunk: Vec<u8> = get_snappy_chunk_16(0x42);
+        let raw_chunk: Vec<u8> = vec![0x45; 16];
+        let mut bevy_data: Vec<u8> = Vec::new();
+        bevy_data.extend_from_slice(&snappy_chunk);
+        let raw_offset: u64 = bevy_data.len() as u64;
+        bevy_data.extend_from_slice(&raw_chunk);
+
+        // Chunk 0 = Snappy (16 x 0x42), chunk 1 = zero (stored_size = 0), chunk 2 = raw (16 x 0x45).
+        let bevy_index: Vec<u8> = build_bevy_index(&[
+            (0, snappy_chunk.len() as u32),
+            (0, 0),
+            (raw_offset, raw_chunk.len() as u32),
+        ]);
+        let map_idx: String = format!(
+            "{}\naff4:Zero\nhttp://aff4.org/Schema#SymbolicStream5A\n",
+            stream_iri
+        );
+        // Media layout (96 bytes):
+        //   [0..48]:  Stream(0) target_offset 0 (chunks 0, 1, 2)
+        //   [48..64]: Gap (zeros)
+        //   [64..80]: Symbolic(0x5a)
+        //   [80..96]: unmapped -> mapGapDefaultStream SymbolicStreamFF
+        let map_data: Vec<u8> = build_map_entries(&[(0, 48, 0, 0), (48, 16, 0, 1), (64, 16, 0, 2)]);
+        let turtle: String = format!(
+            concat!(
+                "@prefix : <{vol}> .\n",
+                "@prefix aff4: <http://aff4.org/Schema#> .\n",
+                "<{stream}> a aff4:ImageStream ;\n",
+                "    aff4:chunkSize \"16\"^^xsd:int ;\n",
+                "    aff4:chunksInSegment \"4\"^^xsd:int ;\n",
+                "    aff4:compressionMethod <http://code.google.com/p/snappy/> ;\n",
+                "    aff4:size \"48\"^^xsd:long .\n",
+                "<{map}> a aff4:Map ;\n",
+                "    aff4:mapGapDefaultStream <http://aff4.org/Schema#SymbolicStreamFF> .\n",
+                "<{img}> a aff4:Image ;\n",
+                "    aff4:blockSize \"512\"^^xsd:int ;\n",
+                "    aff4:dataStream <{map}> ;\n",
+                "    aff4:size \"96\"^^xsd:long .\n"
+            ),
+            vol = volume_iri,
+            stream = stream_iri,
+            map = map_iri,
+            img = image_iri
+        );
+
+        let stream_prefix: String = DataVolume::percent_encode(stream_iri, false);
+        let map_prefix: String = DataVolume::percent_encode(map_iri, false);
+        let bevy_name: String = format!("{}/00000000", stream_prefix);
+        let bevy_index_name: String = format!("{}/00000000.index", stream_prefix);
+        let map_name: String = format!("{}/map", map_prefix);
+        let map_idx_name: String = format!("{}/idx", map_prefix);
+
+        let archive: Vec<u8> = build_test_zip(&[
+            ("version.txt", b"major=1\nminor=0\n"),
+            ("container.description", volume_iri.as_bytes()),
+            ("information.turtle", turtle.as_bytes()),
+            (bevy_name.as_str(), &bevy_data),
+            (bevy_index_name.as_str(), &bevy_index),
+            (map_name.as_str(), &map_data),
+            (map_idx_name.as_str(), map_idx.as_bytes()),
+        ]);
+
+        let resolver: FileResolverReference = FileResolverReference::new(Box::new(
+            MemoryFileResolver::new(vec![("mapped.aff4", archive)]),
+        ));
+        let media: Aff4StandardMedia =
+            Aff4StandardMedia::open(&resolver, &PathComponent::from("mapped.aff4"))?;
+
+        assert!(media.is_mapped());
+        assert_eq!(media.get_media_size(), 96);
+        assert_eq!(media.get_bytes_per_sector(), 512);
+        assert_eq!(media.get_image_name(), image_iri);
+        assert_eq!(media.streams[0].get_number_of_chunks(), 3);
+        assert!(media.streams[0].get_segment_for_chunk(99).is_none());
+
+        let mut reader: Aff4StandardReader = Aff4StandardReader::new(media);
+        assert_eq!(reader.get_size(), 96);
+
+        let mut output: Vec<u8> = vec![0; 96];
+        let read_size: usize = reader.read_data_from_blocks(&mut output, 0)?;
+        assert_eq!(read_size, 96);
+
+        let mut expected: Vec<u8> = Vec::new();
+        expected.extend_from_slice(&[0x42; 16]);
+        expected.extend_from_slice(&[0x00; 16]);
+        expected.extend_from_slice(&[0x45; 16]);
+        expected.extend_from_slice(&[0x00; 16]);
+        expected.extend_from_slice(&[0x5a; 16]);
+        expected.extend_from_slice(&[0xff; 16]);
+        assert_eq!(output, expected);
+
+        // Second read exercises chunk cache and bevy cache.
+        let mut cached_output: Vec<u8> = vec![0; 16];
+        let cached_read_size: usize = reader.read_data_from_blocks(&mut cached_output, 0)?;
+        assert_eq!(cached_read_size, 16);
+        assert_eq!(cached_output, vec![0x42; 16]);
+
+        // Reading at end of media and with empty buffer returns 0.
+        assert_eq!(reader.read_data_from_blocks(&mut cached_output, 96)?, 0);
+        assert_eq!(reader.read_data_from_blocks(&mut [], 0)?, 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_open_and_read_companion_zlib_deflate_and_stream_gap_default() -> Result<(), ErrorTrace>
+    {
+        let zlib_stream_iri: &str = "aff4://00000000-0000-1003-8000-000000000011";
+        let deflate_stream_iri: &str = "aff4://00000000-0000-1003-8000-000000000012";
+        let map_iri: &str = "aff4://00000000-0000-1003-8000-000000000013";
+        let primary_vol_iri: &str = "aff4://00000000-0000-1003-8000-000000000014";
+        let companion_vol_iri: &str = "aff4://00000000-0000-1003-8000-000000000015";
+
+        let zlib_chunk: Vec<u8> = get_zlib_chunk_16_0x44();
+        let zlib_index: Vec<u8> = build_bevy_index(&[(0, zlib_chunk.len() as u32)]);
+        let deflate_chunk: Vec<u8> = get_deflate_chunk_16(0x43);
+
+        // Map entry [0..16] uses zlib stream; gap [16..32] falls through to deflate stream.
+        let map_idx: String = format!("{}\n", zlib_stream_iri);
+        let map_data: Vec<u8> = build_map_entries(&[(0, 16, 0, 0)]);
+
+        let primary_turtle: String = format!(
+            concat!(
+                "@prefix : <{vol}> .\n",
+                "@prefix aff4: <http://aff4.org/Schema#> .\n",
+                "<{zstream}> a aff4:ImageStream ;\n",
+                "    aff4:chunkSize \"16\"^^xsd:int ;\n",
+                "    aff4:compressionMethod <https://www.ietf.org/rfc/rfc1950.txt> ;\n",
+                "    aff4:size \"16\"^^xsd:long .\n",
+                "<{dstream}> a aff4:ImageStream ;\n",
+                "    aff4:chunkSize \"16\"^^xsd:int ;\n",
+                "    aff4:compressionMethod <https://www.ietf.org/rfc/rfc1951.txt> ;\n",
+                "    aff4:stored <{cvol}> .\n",
+                "<{map}> a aff4:Map ;\n",
+                "    aff4:mapGapDefaultStream <{dstream}> .\n",
+                "<aff4://img> a aff4:Image ;\n",
+                "    aff4:dataStream <{map}> ;\n",
+                "    aff4:size \"32\"^^xsd:long .\n"
+            ),
+            vol = primary_vol_iri,
+            cvol = companion_vol_iri,
+            zstream = zlib_stream_iri,
+            dstream = deflate_stream_iri,
+            map = map_iri
+        );
+        let companion_turtle: String = format!(
+            concat!(
+                "@prefix : <{cvol}> .\n",
+                "@prefix aff4: <http://aff4.org/Schema#> .\n",
+                "<{dstream}> a aff4:ImageStream ;\n",
+                "    aff4:chunkSize \"16\"^^xsd:int ;\n",
+                "    aff4:compressionMethod <https://www.ietf.org/rfc/rfc1951.txt> ;\n",
+                "    aff4:size \"32\"^^xsd:long .\n"
+            ),
+            cvol = companion_vol_iri,
+            dstream = deflate_stream_iri
+        );
+
+        let zlib_prefix: String = DataVolume::percent_encode(zlib_stream_iri, false);
+        let deflate_prefix: String = DataVolume::percent_encode(deflate_stream_iri, false);
+        let map_prefix: String = DataVolume::percent_encode(map_iri, false);
+
+        let primary_zip: Vec<u8> = build_test_zip(&[
+            ("version.txt", b"major=1\nminor=0\n"),
+            ("container.description", primary_vol_iri.as_bytes()),
+            ("information.turtle", primary_turtle.as_bytes()),
+            (&format!("{}/00000000", zlib_prefix), &zlib_chunk),
+            (&format!("{}/00000000.index", zlib_prefix), &zlib_index),
+            (&format!("{}/map", map_prefix), &map_data),
+            (&format!("{}/idx", map_prefix), map_idx.as_bytes()),
+        ]);
+        // Companion provides two chunks of 0x43 so offset 16 reads chunk 1.
+        let mut companion_bevy: Vec<u8> = Vec::new();
+        companion_bevy.extend_from_slice(&deflate_chunk);
+        let second_offset: u64 = companion_bevy.len() as u64;
+        companion_bevy.extend_from_slice(&deflate_chunk);
+        let companion_index: Vec<u8> = build_bevy_index(&[
+            (0, deflate_chunk.len() as u32),
+            (second_offset, deflate_chunk.len() as u32),
+        ]);
+        let companion_zip: Vec<u8> = build_test_zip(&[
+            ("version.txt", b"major=1\nminor=0\n"),
+            ("container.description", companion_vol_iri.as_bytes()),
+            ("information.turtle", companion_turtle.as_bytes()),
+            (&format!("{}/00000000", deflate_prefix), &companion_bevy),
+            (
+                &format!("{}/00000000.index", deflate_prefix),
+                &companion_index,
+            ),
+        ]);
+
+        let resolver: FileResolverReference =
+            FileResolverReference::new(Box::new(MemoryFileResolver::new(vec![
+                ("sub/primary.aff4", primary_zip),
+                ("sub/companion.aff4", companion_zip),
+                ("sub/unrelated.txt", b"ignored".to_vec()),
+            ])));
+        let media: Aff4StandardMedia =
+            Aff4StandardMedia::open(&resolver, &PathComponent::from("sub/primary.aff4"))?;
+        assert!(media.is_mapped());
+        assert_eq!(media.get_media_size(), 32);
+
+        let mut reader: Aff4StandardReader = Aff4StandardReader::new(media);
+        let mut output: Vec<u8> = vec![0; 32];
+        let read_size: usize = reader.read_data_from_blocks(&mut output, 0)?;
+        assert_eq!(read_size, 32);
+        assert_eq!(&output[0..16], &[0x44; 16]);
+        assert_eq!(&output[16..32], &[0x43; 16]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_open_with_error_conditions() {
+        // Missing primary volume.
+        let empty_resolver: FileResolverReference =
+            FileResolverReference::new(Box::new(MemoryFileResolver::new(vec![])));
+        assert!(
+            Aff4StandardMedia::open(&empty_resolver, &PathComponent::from("missing.aff4")).is_err()
+        );
+
+        // Non-standard (legacy) primary volume.
+        let legacy_zip: Vec<u8> = build_test_zip(&[
+            ("version.txt", b"major=1\nminor=0\n"),
+            ("container.description", b"aff4://vol\n"),
+            (
+                "information.turtle",
+                b"@base <aff4://vol> .\n</img.raw> a aff4:Image .\n",
+            ),
+            ("img.raw", b"data"),
+        ]);
+        let resolver: FileResolverReference = FileResolverReference::new(Box::new(
+            MemoryFileResolver::new(vec![("legacy.aff4", legacy_zip)]),
+        ));
+        assert!(Aff4StandardMedia::open(&resolver, &PathComponent::from("legacy.aff4")).is_err());
+
+        // Standard volume without ImageStream node.
+        let no_stream_zip: Vec<u8> = build_test_zip(&[
+            ("version.txt", b"major=1\nminor=0\n"),
+            ("container.description", b"aff4://vol\n"),
+            (
+                "information.turtle",
+                b"@prefix : <aff4://vol> .\n<aff4://img> a aff4:Image .\n",
+            ),
+        ]);
+        let resolver: FileResolverReference = FileResolverReference::new(Box::new(
+            MemoryFileResolver::new(vec![("nostream.aff4", no_stream_zip)]),
+        ));
+        assert!(Aff4StandardMedia::open(&resolver, &PathComponent::from("nostream.aff4")).is_err());
+
+        // ImageStream node without data entries in volume.
+        let no_bevy_zip: Vec<u8> = build_test_zip(&[
+            ("version.txt", b"major=1\nminor=0\n"),
+            ("container.description", b"aff4://vol\n"),
+            (
+                "information.turtle",
+                b"@prefix : <aff4://vol> .\n<aff4://s> a aff4:ImageStream ; aff4:chunkSize \"16\" .\n",
+            ),
+        ]);
+        let resolver: FileResolverReference = FileResolverReference::new(Box::new(
+            MemoryFileResolver::new(vec![("nobevy.aff4", no_bevy_zip)]),
+        ));
+        assert!(Aff4StandardMedia::open(&resolver, &PathComponent::from("nobevy.aff4")).is_err());
+
+        // Map node missing its map/idx entries.
+        let stream_prefix: String = DataVolume::percent_encode("aff4://s", false);
+        let bevy_index: Vec<u8> = build_bevy_index(&[(0, 16)]);
+        let bad_map_zip: Vec<u8> = build_test_zip(&[
+            ("version.txt", b"major=1\nminor=0\n"),
+            ("container.description", b"aff4://vol\n"),
+            (
+                "information.turtle",
+                concat!(
+                    "@prefix : <aff4://vol> .\n",
+                    "<aff4://s> a aff4:ImageStream ; aff4:chunkSize \"16\" .\n",
+                    "<aff4://m> a aff4:Map .\n",
+                    "<aff4://img> a aff4:Image ; aff4:dataStream <aff4://m> .\n"
+                )
+                .as_bytes(),
+            ),
+            (&format!("{}/00000000", stream_prefix), &[0x11; 16]),
+            (&format!("{}/00000000.index", stream_prefix), &bevy_index),
+        ]);
+        let resolver: FileResolverReference = FileResolverReference::new(Box::new(
+            MemoryFileResolver::new(vec![("badmap.aff4", bad_map_zip)]),
+        ));
+        assert!(Aff4StandardMedia::open(&resolver, &PathComponent::from("badmap.aff4")).is_err());
+
+        // Map node with invalid map data size (not a multiple of 28).
+        let map_prefix: String = DataVolume::percent_encode("aff4://m", false);
+        let bad_map_size_zip: Vec<u8> = build_test_zip(&[
+            ("version.txt", b"major=1\nminor=0\n"),
+            ("container.description", b"aff4://vol\n"),
+            (
+                "information.turtle",
+                concat!(
+                    "@prefix : <aff4://vol> .\n",
+                    "<aff4://s> a aff4:ImageStream ; aff4:chunkSize \"16\" .\n",
+                    "<aff4://m> a aff4:Map .\n",
+                    "<aff4://img> a aff4:Image ; aff4:dataStream <aff4://m> .\n"
+                )
+                .as_bytes(),
+            ),
+            (&format!("{}/00000000", stream_prefix), &[0x11; 16]),
+            (&format!("{}/00000000.index", stream_prefix), &bevy_index),
+            (&format!("{}/map", map_prefix), &[0; 10]),
+            (&format!("{}/idx", map_prefix), b"aff4://s\n"),
+        ]);
+        let resolver: FileResolverReference = FileResolverReference::new(Box::new(
+            MemoryFileResolver::new(vec![("badmapsize.aff4", bad_map_size_zip)]),
+        ));
+        assert!(
+            Aff4StandardMedia::open(&resolver, &PathComponent::from("badmapsize.aff4")).is_err()
+        );
+
+        // Map node with invalid UTF-8 idx entry.
+        let bad_idx_zip: Vec<u8> = build_test_zip(&[
+            ("version.txt", b"major=1\nminor=0\n"),
+            ("container.description", b"aff4://vol\n"),
+            (
+                "information.turtle",
+                concat!(
+                    "@prefix : <aff4://vol> .\n",
+                    "<aff4://s> a aff4:ImageStream ; aff4:chunkSize \"16\" .\n",
+                    "<aff4://m> a aff4:Map .\n",
+                    "<aff4://img> a aff4:Image ; aff4:dataStream <aff4://m> .\n"
+                )
+                .as_bytes(),
+            ),
+            (&format!("{}/00000000", stream_prefix), &[0x11; 16]),
+            (&format!("{}/00000000.index", stream_prefix), &bevy_index),
+            (&format!("{}/map", map_prefix), &[0; 28]),
+            (&format!("{}/idx", map_prefix), &[0xff, 0xfe]),
+        ]);
+        let resolver: FileResolverReference = FileResolverReference::new(Box::new(
+            MemoryFileResolver::new(vec![("badidx.aff4", bad_idx_zip)]),
+        ));
+        assert!(Aff4StandardMedia::open(&resolver, &PathComponent::from("badidx.aff4")).is_err());
+    }
+
+    #[test]
+    fn test_reader_error_paths() -> Result<(), ErrorTrace> {
+        let stream_prefix: String = DataVolume::percent_encode("aff4://s", false);
+        let bad_compressed: &[u8] = &[0xff, 0xfe, 0xfd, 0xfc];
+
+        // Test decompression errors for Snappy, Zlib, Deflate and unsupported Stored size.
+        for compression_iri in [
+            "http://code.google.com/p/snappy/",
+            "https://www.ietf.org/rfc/rfc1950.txt",
+            "https://www.ietf.org/rfc/rfc1951.txt",
+            "http://aff4.org/Schema#NullCompressor",
+        ] {
+            let bevy_index: Vec<u8> = build_bevy_index(&[(0, bad_compressed.len() as u32)]);
+            let turtle: String = format!(
+                concat!(
+                    "@prefix : <aff4://vol> .\n",
+                    "<aff4://s> a aff4:ImageStream ;\n",
+                    "    aff4:chunkSize \"16\" ;\n",
+                    "    aff4:compressionMethod <{comp}> .\n"
+                ),
+                comp = compression_iri
+            );
+            let archive: Vec<u8> = build_test_zip(&[
+                ("version.txt", b"major=1\nminor=0\n"),
+                ("container.description", b"aff4://vol\n"),
+                ("information.turtle", turtle.as_bytes()),
+                (&format!("{}/00000000", stream_prefix), bad_compressed),
+                (&format!("{}/00000000.index", stream_prefix), &bevy_index),
+            ]);
+            let resolver: FileResolverReference = FileResolverReference::new(Box::new(
+                MemoryFileResolver::new(vec![("err.aff4", archive)]),
+            ));
+            let media: Aff4StandardMedia =
+                Aff4StandardMedia::open(&resolver, &PathComponent::from("err.aff4"))?;
+            assert!(!media.is_mapped());
+            assert_eq!(media.get_media_size(), 16);
+
+            let mut reader: Aff4StandardReader = Aff4StandardReader::new(media);
+            let mut output: Vec<u8> = vec![0; 16];
+            assert!(reader.read_data_from_blocks(&mut output, 0).is_err());
+        }
+
+        // Test out-of-bounds bevy offset for both uncompressed and compressed chunk paths.
+        for stored_size in [16u32, 4u32] {
+            let bevy_index: Vec<u8> = build_bevy_index(&[(100, stored_size)]);
+            let turtle: &str = concat!(
+                "@prefix : <aff4://vol> .\n",
+                "<aff4://s> a aff4:ImageStream ;\n",
+                "    aff4:chunkSize \"16\" ;\n",
+                "    aff4:compressionMethod <http://code.google.com/p/snappy/> .\n"
+            );
+            let archive: Vec<u8> = build_test_zip(&[
+                ("version.txt", b"major=1\nminor=0\n"),
+                ("container.description", b"aff4://vol\n"),
+                ("information.turtle", turtle.as_bytes()),
+                (&format!("{}/00000000", stream_prefix), &[0; 16]),
+                (&format!("{}/00000000.index", stream_prefix), &bevy_index),
+            ]);
+            let resolver: FileResolverReference = FileResolverReference::new(Box::new(
+                MemoryFileResolver::new(vec![("oob.aff4", archive)]),
+            ));
+            let media: Aff4StandardMedia =
+                Aff4StandardMedia::open(&resolver, &PathComponent::from("oob.aff4"))?;
+            let mut reader: Aff4StandardReader = Aff4StandardReader::new(media);
+            let mut output: Vec<u8> = vec![0; 16];
+            assert!(reader.read_data_from_blocks(&mut output, 0).is_err());
+        }
+
+        // Test missing stream/segment/chunk errors directly on Aff4StandardReader.
+        let empty_media: Aff4StandardMedia = Aff4StandardMedia {
+            volumes: Vec::new(),
+            streams: Vec::new(),
+            map: None,
+            media_size: 16,
+            image_name: String::new(),
+            bytes_per_sector: 512,
+        };
+        let mut reader: Aff4StandardReader = Aff4StandardReader::new(empty_media);
+        let mut output: Vec<u8> = vec![0; 16];
+        assert!(reader.read_data_from_blocks(&mut output, 0).is_err());
+        assert!(reader.get_bevy_data(0, 0).is_err());
+        assert!(reader.get_chunk(0, 0).is_err());
+        assert!(reader.read_stream_data(0, 0, &mut output).is_err());
+
+        Ok(())
+    }
+}

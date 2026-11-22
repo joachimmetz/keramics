@@ -162,12 +162,12 @@ impl AffFile {
         self.number_of_bad_sectors
     }
 
-    /// Determines the number of stored pages of the image.
+    /// Retrieves the number of stored pages of the image.
     pub fn get_number_of_pages(&self) -> usize {
         self.number_of_pages
     }
 
-    /// Determines the number of parsed segments.
+    /// Retrieves the number of parsed segments.
     pub fn get_number_of_segments(&self) -> usize {
         self.segments.len()
     }
@@ -296,10 +296,10 @@ impl AffFile {
             let data_length: u32 = u32::from_be_bytes(segment_header[8..12].try_into().unwrap());
             let flag: u32 = u32::from_be_bytes(segment_header[12..16].try_into().unwrap());
 
-            if name_length > AFF_MAX_SEGMENT_NAME_SIZE {
+            if name_length > AFF_MAXIMUM_SEGMENT_NAME_SIZE {
                 return Err(keramics_core::error_trace_new!(format!(
                     "Segment name size: {} is larger than the maximum size: {} at offset: {} (0x{:08x})",
-                    name_length, AFF_MAX_SEGMENT_NAME_SIZE, current_offset, current_offset
+                    name_length, AFF_MAXIMUM_SEGMENT_NAME_SIZE, current_offset, current_offset
                 )));
             }
             let name_offset: u64 = current_offset + AFF_SEGMENT_HEADER_SIZE;
@@ -456,9 +456,29 @@ mod tests {
 
     use std::path::PathBuf;
 
+    use crate::fake_file_resolver::FakeFileResolver;
     use crate::os_file_resolver::OsFileResolver;
-
     use crate::tests::get_test_data_path;
+
+    fn build_test_aff(segments: &[(&[u8], u32, &[u8])]) -> Vec<u8> {
+        let mut data: Vec<u8> = b"AFF10\r\n\0".to_vec();
+
+        for (name, flag, segment_data) in segments {
+            let segment_size: u32 = (AFF_SEGMENT_HEADER_SIZE
+                + name.len() as u64
+                + segment_data.len() as u64
+                + AFF_SEGMENT_TAIL_SIZE) as u32;
+            data.extend_from_slice(&AFF_SEGMENT_SIGNATURE);
+            extend_u32_be(&mut data, name.len() as u32);
+            extend_u32_be(&mut data, segment_data.len() as u32);
+            extend_u32_be(&mut data, *flag);
+            data.extend_from_slice(name);
+            data.extend_from_slice(segment_data);
+            data.extend_from_slice(&AFF_SEGMENT_TAIL_SIGNATURE);
+            extend_u32_be(&mut data, segment_size);
+        }
+        data
+    }
 
     fn extend_u32_be(data: &mut Vec<u8>, value: u32) {
         data.extend_from_slice(&value.to_be_bytes());
@@ -709,5 +729,104 @@ mod tests {
         assert!(file.get_segment("").is_some());
 
         Ok(())
+    }
+
+    #[test]
+    fn test_get_page_index() {
+        assert_eq!(get_page_index("page0"), Some(0));
+        assert_eq!(get_page_index("page42"), Some(42));
+        assert_eq!(get_page_index("page"), None);
+        assert_eq!(get_page_index("pageabc"), None);
+        assert_eq!(get_page_index("imagesize"), None);
+    }
+
+    #[test]
+    fn test_open_with_missing_file() {
+        let mut file: AffFile = AffFile::new();
+        let file_resolver: FileResolverReference =
+            FileResolverReference::new(Box::new(FakeFileResolver::new()));
+        let file_name: PathComponent = PathComponent::from("missing.AFF");
+
+        let result: Result<(), ErrorTrace> = file.open(&file_resolver, &file_name);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_segment_name_too_large() {
+        let long_name: Vec<u8> = vec![b'a'; (AFF_MAXIMUM_SEGMENT_NAME_SIZE as usize) + 1];
+        let test_data: Vec<u8> = build_test_aff(&[(&long_name, 0, b"")]);
+
+        let mut file: AffFile = AffFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&test_data);
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_invalid_utf8_segment_name() {
+        let test_data: Vec<u8> = build_test_aff(&[(&[0xff, 0xfe], 0, b"")]);
+
+        let mut file: AffFile = AffFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&test_data);
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_stream_with_pagesize_and_sectorsize_from_data() -> Result<(), ErrorTrace> {
+        let page_size_data: [u8; 4] = 4096u32.to_be_bytes();
+        let sector_size_data: [u8; 4] = 1024u32.to_be_bytes();
+        let bad_sectors_data: [u8; 8] = [0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00];
+        let test_data: Vec<u8> = build_test_aff(&[
+            (b"pagesize", 0, &page_size_data),
+            (b"sectorsize", 0, &sector_size_data),
+            (b"badsectors", 0, &bad_sectors_data),
+            (b"empty", 0, b""),
+            (b"page0", 0, &[0x41; 4096]),
+        ]);
+
+        let mut file: AffFile = AffFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&test_data);
+        file.read_data_stream(&data_stream)?;
+
+        assert_eq!(file.get_page_size(), 4096);
+        assert_eq!(file.get_bytes_per_sector(), 1024);
+        assert_eq!(file.get_number_of_pages(), 1);
+        assert_eq!(file.get_media_size(), 4096);
+        assert_eq!(file.get_number_of_bad_sectors(), 3);
+        assert!(file.get_bad_flag().is_empty());
+        assert!(file.get_segment_data("empty")?.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_data_stream_with_segsize_fallback() -> Result<(), ErrorTrace> {
+        let test_data: Vec<u8> = build_test_aff(&[(b"segsize", 8192, b"")]);
+
+        let mut file: AffFile = AffFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&test_data);
+        file.read_data_stream(&data_stream)?;
+        assert_eq!(file.get_page_size(), 8192);
+
+        let segsize_data: [u8; 4] = 16384u32.to_be_bytes();
+        let test_data: Vec<u8> = build_test_aff(&[(b"segsize", 0, &segsize_data)]);
+
+        let mut file: AffFile = AffFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&test_data);
+        file.read_data_stream(&data_stream)?;
+        assert_eq!(file.get_page_size(), 16384);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_data_stream_with_invalid_imagesize() {
+        let test_data: Vec<u8> = build_test_aff(&[(b"imagesize", 0, &[0x01, 0x02])]);
+
+        let mut file: AffFile = AffFile::new();
+        let data_stream: DataStreamReference = open_fake_data_stream(&test_data);
+        let result: Result<(), ErrorTrace> = file.read_data_stream(&data_stream);
+        assert!(result.is_err());
     }
 }

@@ -43,13 +43,13 @@
 use keramics_core::ErrorTrace;
 
 /// Maximum uncompressed data size in bytes (2^32 - 1).
-const SNAPPY_MAX_INPUT_SIZE: u64 = (1 << 32) - 1;
+const SNAPPY_MAXIMUM_INPUT_SIZE: u64 = (1 << 32) - 1;
 
 /// Maximum number of bytes used to encode a variable-length integer.
-const SNAPPY_MAX_VARINT_SIZE: usize = 5;
+const SNAPPY_MAXIMUM_VARIABLE_LENGTH_INTEGER_SIZE: usize = 5;
 
 /// Maximum literal length encoded directly in the tag (1-60 bytes).
-const SNAPPY_LITERAL_MAX_DIRECT_LENGTH: u8 = 60;
+const SNAPPY_LITERAL_MAXIMUM_DIRECT_LENGTH: u8 = 60;
 
 /// Context for decompressing Snappy compressed data.
 pub struct SnappyContext {
@@ -65,7 +65,7 @@ impl SnappyContext {
         }
     }
 
-    /// Decompress data.
+    /// Decompresses data.
     ///
     /// The `uncompressed_data` slice must already be sized to the expected
     /// uncompressed output.
@@ -80,17 +80,18 @@ impl SnappyContext {
             ));
         }
         let mut offset: usize = 0;
-        let uncompressed_data_size: u64 = match Self::read_varint(compressed_data, &mut offset) {
-            Ok(uncompressed_data_size) => uncompressed_data_size,
-            Err(mut error) => {
-                keramics_core::error_trace_add_frame!(
-                    error,
-                    "Unable to read uncompressed data size"
-                );
-                return Err(error);
-            }
-        };
-        if uncompressed_data_size > SNAPPY_MAX_INPUT_SIZE {
+        let uncompressed_data_size: u64 =
+            match Self::read_variable_length_integer(compressed_data, &mut offset) {
+                Ok(uncompressed_data_size) => uncompressed_data_size,
+                Err(mut error) => {
+                    keramics_core::error_trace_add_frame!(
+                        error,
+                        "Unable to read uncompressed data size"
+                    );
+                    return Err(error);
+                }
+            };
+        if uncompressed_data_size > SNAPPY_MAXIMUM_INPUT_SIZE {
             return Err(keramics_core::error_trace_new!(
                 "Invalid uncompressed data size value too large"
             ));
@@ -119,11 +120,11 @@ impl SnappyContext {
                 0b00 => {
                     let literal_length: usize;
                     let extra: u8 = tag >> 2;
-                    if extra < SNAPPY_LITERAL_MAX_DIRECT_LENGTH {
+                    if extra < SNAPPY_LITERAL_MAXIMUM_DIRECT_LENGTH {
                         literal_length = usize::from(extra) + 1;
                     } else {
                         let number_of_length_bytes: usize =
-                            usize::from(extra - SNAPPY_LITERAL_MAX_DIRECT_LENGTH + 1);
+                            usize::from(extra - SNAPPY_LITERAL_MAXIMUM_DIRECT_LENGTH + 1);
                         if offset + number_of_length_bytes > input_size {
                             return Err(keramics_core::error_trace_new!(
                                 "Invalid compressed data value too small"
@@ -135,7 +136,7 @@ impl SnappyContext {
                                 | (u64::from(compressed_data[offset + byte_index])
                                     << (8 * byte_index));
                         }
-                        if length_value > SNAPPY_MAX_INPUT_SIZE {
+                        if length_value > SNAPPY_MAXIMUM_INPUT_SIZE {
                             return Err(keramics_core::error_trace_new!(
                                 "Invalid uncompressed data size value too large"
                             ));
@@ -247,11 +248,11 @@ impl SnappyContext {
     }
 
     /// Reads a variable-length integer.
-    fn read_varint(data: &[u8], offset: &mut usize) -> Result<u64, ErrorTrace> {
+    fn read_variable_length_integer(data: &[u8], offset: &mut usize) -> Result<u64, ErrorTrace> {
         let mut value: u64 = 0;
         let mut shift: u32 = 0;
 
-        for _ in 0..SNAPPY_MAX_VARINT_SIZE {
+        for _ in 0..SNAPPY_MAXIMUM_VARIABLE_LENGTH_INTEGER_SIZE {
             if *offset >= data.len() {
                 return Err(keramics_core::error_trace_new!(
                     "Invalid compressed data value too small"
@@ -1965,9 +1966,9 @@ mod tests {
         assert_eq!(&uncompressed_data[..64], CHUNK0_FIRST);
 
         let sum: u64 = uncompressed_data.iter().map(|b| *b as u64).sum();
-        let x: u8 = uncompressed_data.iter().fold(0u8, |a, b| a ^ b);
+        let xor_value: u8 = uncompressed_data.iter().fold(0u8, |a, b| a ^ b);
         assert_eq!(sum, CHUNK0_SUM);
-        assert_eq!(x, CHUNK0_XOR);
+        assert_eq!(xor_value, CHUNK0_XOR);
 
         Ok(())
     }
@@ -1978,6 +1979,30 @@ mod tests {
         let mut uncompressed_data: Vec<u8> = vec![];
 
         let result: Result<(), ErrorTrace> = context.decompress(&[], &mut uncompressed_data);
+        assert!(result.is_err(), "was supposed to fail");
+    }
+
+    #[test]
+    fn test_decompress_with_truncated_variable_length_integer() {
+        let compressed_data: Vec<u8> = vec![0x80];
+
+        let mut context: SnappyContext = SnappyContext::new();
+        let mut uncompressed_data: Vec<u8> = vec![];
+
+        let result: Result<(), ErrorTrace> =
+            context.decompress(&compressed_data, &mut uncompressed_data);
+        assert!(result.is_err(), "was supposed to fail");
+    }
+
+    #[test]
+    fn test_decompress_with_overlong_variable_length_integer() {
+        let compressed_data: Vec<u8> = vec![0x80, 0x80, 0x80, 0x80, 0x80];
+
+        let mut context: SnappyContext = SnappyContext::new();
+        let mut uncompressed_data: Vec<u8> = vec![];
+
+        let result: Result<(), ErrorTrace> =
+            context.decompress(&compressed_data, &mut uncompressed_data);
         assert!(result.is_err(), "was supposed to fail");
     }
 
@@ -2006,6 +2031,20 @@ mod tests {
     }
 
     #[test]
+    fn test_decompress_with_truncated_literal_length() {
+        // Declared length of 64 bytes, literal tag with 1 extra length byte
+        // missing from input.
+        let compressed_data: Vec<u8> = vec![0x40, 0xf0];
+
+        let mut context: SnappyContext = SnappyContext::new();
+        let mut uncompressed_data: Vec<u8> = vec![0; 64];
+
+        let result: Result<(), ErrorTrace> =
+            context.decompress(&compressed_data, &mut uncompressed_data);
+        assert!(result.is_err(), "was supposed to fail");
+    }
+
+    #[test]
     fn test_decompress_with_truncated_literal() {
         // Declared length of three bytes, one literal tag for three bytes
         // and only two literal bytes.
@@ -2020,9 +2059,73 @@ mod tests {
     }
 
     #[test]
+    fn test_decompress_with_literal_length_too_large() {
+        // Declared length of two bytes, literal tag for three bytes.
+        let compressed_data: Vec<u8> = vec![0x02, 0x08, 0x61, 0x62, 0x63];
+
+        let mut context: SnappyContext = SnappyContext::new();
+        let mut uncompressed_data: Vec<u8> = vec![0; 2];
+
+        let result: Result<(), ErrorTrace> =
+            context.decompress(&compressed_data, &mut uncompressed_data);
+        assert!(result.is_err(), "was supposed to fail");
+    }
+
+    #[test]
+    fn test_decompress_with_overlapping_copy1() -> Result<(), ErrorTrace> {
+        // One literal byte followed by a copy1 replicating it four times.
+        let compressed_data: Vec<u8> = vec![0x05, 0x00, 0x61, 0x01, 0x01];
+
+        let mut context: SnappyContext = SnappyContext::new();
+        let mut uncompressed_data: Vec<u8> = vec![0; 5];
+
+        context.decompress(&compressed_data, &mut uncompressed_data)?;
+        assert_eq!(context.uncompressed_data_size, 5);
+        assert_eq!(uncompressed_data, b"aaaaa");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_decompress_with_truncated_copy1() {
+        let compressed_data: Vec<u8> = vec![0x05, 0x00, 0x61, 0x01];
+
+        let mut context: SnappyContext = SnappyContext::new();
+        let mut uncompressed_data: Vec<u8> = vec![0; 5];
+
+        let result: Result<(), ErrorTrace> =
+            context.decompress(&compressed_data, &mut uncompressed_data);
+        assert!(result.is_err(), "was supposed to fail");
+    }
+
+    #[test]
+    fn test_decompress_with_copy1_invalid_offset() {
+        let compressed_data: Vec<u8> = vec![0x05, 0x00, 0x61, 0x01, 0x00];
+
+        let mut context: SnappyContext = SnappyContext::new();
+        let mut uncompressed_data: Vec<u8> = vec![0; 5];
+
+        let result: Result<(), ErrorTrace> =
+            context.decompress(&compressed_data, &mut uncompressed_data);
+        assert!(result.is_err(), "was supposed to fail");
+    }
+
+    #[test]
+    fn test_decompress_with_truncated_copy2() {
+        let compressed_data: Vec<u8> = vec![0x05, 0x00, 0x61, 0x0e, 0x01];
+
+        let mut context: SnappyContext = SnappyContext::new();
+        let mut uncompressed_data: Vec<u8> = vec![0; 5];
+
+        let result: Result<(), ErrorTrace> =
+            context.decompress(&compressed_data, &mut uncompressed_data);
+        assert!(result.is_err(), "was supposed to fail");
+    }
+
+    #[test]
     fn test_decompress_with_zero_copy_offset() {
         // Four literal bytes followed by a copy2 with a zero offset.
-        let compressed_data: Vec<u8> = vec![0x04, 0x0c, 0x61, 0x61, 0x61, 0x61, 0x0e, 0x00, 0x00];
+        let compressed_data: Vec<u8> = vec![0x08, 0x0c, 0x61, 0x61, 0x61, 0x61, 0x0e, 0x00, 0x00];
 
         let mut context: SnappyContext = SnappyContext::new();
         let mut uncompressed_data: Vec<u8> = vec![0; 8];
@@ -2036,7 +2139,7 @@ mod tests {
     fn test_decompress_with_copy_offset_out_of_bounds() {
         // Two literal bytes followed by a copy2 with an offset beyond the
         // current output size.
-        let compressed_data: Vec<u8> = vec![0x02, 0x08, 0x61, 0x62, 0x0e, 0x05, 0x00];
+        let compressed_data: Vec<u8> = vec![0x06, 0x04, 0x61, 0x62, 0x0e, 0x05, 0x00];
 
         let mut context: SnappyContext = SnappyContext::new();
         let mut uncompressed_data: Vec<u8> = vec![0; 6];
@@ -2054,6 +2157,43 @@ mod tests {
 
         let mut context: SnappyContext = SnappyContext::new();
         let mut uncompressed_data: Vec<u8> = vec![0; 8];
+
+        let result: Result<(), ErrorTrace> =
+            context.decompress(&compressed_data, &mut uncompressed_data);
+        assert!(result.is_err(), "was supposed to fail");
+    }
+
+    #[test]
+    fn test_decompress_with_truncated_copy4() {
+        let compressed_data: Vec<u8> = vec![0x05, 0x00, 0x61, 0x0f, 0x01, 0x00];
+
+        let mut context: SnappyContext = SnappyContext::new();
+        let mut uncompressed_data: Vec<u8> = vec![0; 5];
+
+        let result: Result<(), ErrorTrace> =
+            context.decompress(&compressed_data, &mut uncompressed_data);
+        assert!(result.is_err(), "was supposed to fail");
+    }
+
+    #[test]
+    fn test_decompress_with_copy4_invalid_offset() {
+        let compressed_data: Vec<u8> = vec![0x05, 0x00, 0x61, 0x0f, 0x00, 0x00, 0x00, 0x00];
+
+        let mut context: SnappyContext = SnappyContext::new();
+        let mut uncompressed_data: Vec<u8> = vec![0; 5];
+
+        let result: Result<(), ErrorTrace> =
+            context.decompress(&compressed_data, &mut uncompressed_data);
+        assert!(result.is_err(), "was supposed to fail");
+    }
+
+    #[test]
+    fn test_decompress_with_short_output() {
+        // Declared length of four bytes, but only two literal bytes emitted.
+        let compressed_data: Vec<u8> = vec![0x04, 0x04, 0x61, 0x62];
+
+        let mut context: SnappyContext = SnappyContext::new();
+        let mut uncompressed_data: Vec<u8> = vec![0; 4];
 
         let result: Result<(), ErrorTrace> =
             context.decompress(&compressed_data, &mut uncompressed_data);
