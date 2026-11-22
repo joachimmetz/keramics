@@ -53,11 +53,35 @@ impl ZipFile {
         }
     }
 
-    /// Retrieves an entry with the specified name.
-    pub fn get_entry(&self, file_name: &str) -> Option<&ZipEntry> {
-        self.entries
-            .iter()
-            .find(|entry| entry.file_name == file_name)
+    /// Finds the end of central directory record, which is located at the end
+    /// of the file and is followed by the Zip file comment (if present).
+    fn find_end_of_central_directory(
+        &self,
+        data_stream: &DataStreamReference,
+        file_size: u64,
+    ) -> Result<(u64, ZipEndOfCentralDirectoryRecord), ErrorTrace> {
+        let search_start_offset: u64 = file_size.saturating_sub(22 + 65535);
+
+        let mut eocd_offset: u64 = file_size - 22;
+
+        loop {
+            let mut eocd: ZipEndOfCentralDirectoryRecord = ZipEndOfCentralDirectoryRecord::new();
+
+            if eocd
+                .read_at_position(data_stream, SeekFrom::Start(eocd_offset))
+                .is_ok()
+                && eocd_offset + 22 + (eocd.file_comment_length as u64) == file_size
+            {
+                return Ok((eocd_offset, eocd));
+            }
+            if eocd_offset <= search_start_offset {
+                break;
+            }
+            eocd_offset -= 1;
+        }
+        Err(keramics_core::error_trace_new!(
+            "Missing end of central directory record"
+        ))
     }
 
     /// Retrieves the entries.
@@ -65,9 +89,221 @@ impl ZipFile {
         &self.entries
     }
 
+    /// Retrieves an entry with the specified name.
+    pub fn get_entry(&self, file_name: &str) -> Option<&ZipEntry> {
+        self.entries
+            .iter()
+            .find(|entry| entry.file_name == file_name)
+    }
+
     /// Retrieves the Zip file comment.
     pub fn get_file_comment(&self) -> &str {
         &self.file_comment
+    }
+
+    /// Reads a Zip file.
+    pub fn read_data_stream(
+        &mut self,
+        data_stream: &DataStreamReference,
+    ) -> Result<(), ErrorTrace> {
+        let file_size: u64 = keramics_core::data_stream_get_size!(data_stream);
+
+        if file_size < 22 {
+            return Err(keramics_core::error_trace_new!(
+                "Unsupported data size too small for end of central directory record"
+            ));
+        }
+        let (eocd_offset, eocd): (u64, ZipEndOfCentralDirectoryRecord) =
+            match self.find_end_of_central_directory(data_stream, file_size) {
+                Ok(record) => record,
+                Err(mut error) => {
+                    keramics_core::error_trace_add_frame!(
+                        error,
+                        "Unable to find end of central directory record"
+                    );
+                    return Err(error);
+                }
+            };
+        let (central_directory_offset, central_directory_size, number_of_entries): (u64, u64, u64) =
+            match self.read_end_of_central_directory_record(
+                data_stream,
+                &eocd,
+                eocd_offset,
+                file_size,
+            ) {
+                Ok(record) => record,
+                Err(mut error) => {
+                    keramics_core::error_trace_add_frame!(
+                        error,
+                        "Unable to read end of central directory record"
+                    );
+                    return Err(error);
+                }
+            };
+        if central_directory_size != 0
+            && central_directory_offset + central_directory_size > file_size
+        {
+            return Err(keramics_core::error_trace_new!(
+                "Unsupported central directory size value out of bounds"
+            ));
+        }
+        match self.read_entries(data_stream, central_directory_offset, number_of_entries) {
+            Ok(_) => {}
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(
+                    error,
+                    "Unable to read central directory entries"
+                );
+                return Err(error);
+            }
+        }
+        if eocd.file_comment_length != 0 {
+            let mut comment_data: Vec<u8> = vec![0; eocd.file_comment_length as usize];
+
+            keramics_core::data_stream_read_exact_at_position!(
+                data_stream,
+                &mut comment_data,
+                SeekFrom::Start(eocd_offset + 22)
+            );
+            self.file_comment = match String::from_utf8(comment_data) {
+                Ok(string) => string,
+                Err(error) => {
+                    return Err(keramics_core::error_trace_new!(format!(
+                        "Unsupported encoding of Zip file comment with error: {}",
+                        error
+                    )));
+                }
+            };
+        }
+        self.data_stream = Some(data_stream.clone());
+
+        Ok(())
+    }
+
+    /// Reads the zip64 end of central directory records (if present) and
+    /// retrieves the offsets and sizes of the central directory.
+    fn read_end_of_central_directory_record(
+        &mut self,
+        data_stream: &DataStreamReference,
+        eocd: &ZipEndOfCentralDirectoryRecord,
+        eocd_offset: u64,
+        file_size: u64,
+    ) -> Result<(u64, u64, u64), ErrorTrace> {
+        let mut central_directory_offset: u64 = eocd.central_directory_offset as u64;
+        let mut central_directory_size: u64 = eocd.central_directory_size as u64;
+        let mut number_of_entries: u64 = eocd.number_of_entries as u64;
+
+        if eocd.number_of_entries == 0xffff
+            || eocd.central_directory_size == 0xffffffff
+            || eocd.central_directory_offset == 0xffffffff
+        {
+            if eocd_offset < 20 {
+                return Err(keramics_core::error_trace_new!(
+                    "Missing zip64 end of central directory locator"
+                ));
+            }
+            let mut eocd64_locator: Zip64EndOfCentralDirectoryLocator =
+                Zip64EndOfCentralDirectoryLocator::new();
+
+            match eocd64_locator.read_at_position(data_stream, SeekFrom::Start(eocd_offset - 20)) {
+                Ok(_) => {}
+                Err(mut error) => {
+                    keramics_core::error_trace_add_frame!(
+                        error,
+                        "Unable to read zip64 end of central directory locator"
+                    );
+                    return Err(error);
+                }
+            }
+            if eocd64_locator.eocd64_offset + 56 > file_size
+                || eocd64_locator.eocd64_offset >= eocd_offset
+            {
+                return Err(keramics_core::error_trace_new!(
+                    "Unsupported zip64 end of central directory record offset value out of bounds"
+                ));
+            }
+            let mut eocd64: Zip64EndOfCentralDirectoryRecord =
+                Zip64EndOfCentralDirectoryRecord::new();
+
+            match eocd64
+                .read_at_position(data_stream, SeekFrom::Start(eocd64_locator.eocd64_offset))
+            {
+                Ok(_) => {}
+                Err(mut error) => {
+                    keramics_core::error_trace_add_frame!(
+                        error,
+                        format!(
+                            "Unable to read zip64 end of central directory record at offset: {} (0x{:08x})",
+                            eocd64_locator.eocd64_offset, eocd64_locator.eocd64_offset
+                        )
+                    );
+                    return Err(error);
+                }
+            }
+            number_of_entries = eocd64.number_of_entries;
+            central_directory_size = eocd64.central_directory_size;
+            central_directory_offset = eocd64.central_directory_offset;
+        }
+        Ok((
+            central_directory_offset,
+            central_directory_size,
+            number_of_entries,
+        ))
+    }
+
+    /// Reads the central directory entries.
+    fn read_entries(
+        &mut self,
+        data_stream: &DataStreamReference,
+        central_directory_offset: u64,
+        number_of_entries: u64,
+    ) -> Result<(), ErrorTrace> {
+        let mut entry_offset: u64 = central_directory_offset;
+
+        for _ in 0..number_of_entries {
+            let mut entry: ZipEntry = ZipEntry::new();
+
+            match entry.read_at_position(data_stream, SeekFrom::Start(entry_offset)) {
+                Ok(_) => {}
+                Err(mut error) => {
+                    keramics_core::error_trace_add_frame!(
+                        error,
+                        format!(
+                            "Unable to read central directory entry at offset: {} (0x{:08x})",
+                            entry_offset, entry_offset
+                        )
+                    );
+                    return Err(error);
+                }
+            }
+            let file_name_length: usize = entry.file_name_length as usize;
+
+            if file_name_length != 0 {
+                let mut file_name_data: Vec<u8> = vec![0; file_name_length];
+
+                keramics_core::data_stream_read_exact_at_position!(
+                    data_stream,
+                    &mut file_name_data,
+                    SeekFrom::Start(entry_offset + 46)
+                );
+                entry.file_name = match String::from_utf8(file_name_data) {
+                    Ok(string) => string,
+                    Err(error) => {
+                        return Err(keramics_core::error_trace_new!(format!(
+                            "Unsupported encoding of entry file name with error: {}",
+                            error
+                        )));
+                    }
+                };
+            }
+            let entry_length: u64 = 46
+                + (entry.file_name_length as u64)
+                + (entry.extra_field_length as u64)
+                + (entry.file_comment_length as u64);
+            self.entries.push(entry);
+            entry_offset += entry_length;
+        }
+        Ok(())
     }
 
     /// Reads the data of a stored (not compressed) or deflate compressed entry.
@@ -170,237 +406,6 @@ impl ZipFile {
             )));
         }
         Ok(())
-    }
-
-    /// Reads a Zip file.
-    pub fn read_data_stream(
-        &mut self,
-        data_stream: &DataStreamReference,
-    ) -> Result<(), ErrorTrace> {
-        let file_size: u64 = keramics_core::data_stream_get_size!(data_stream);
-
-        if file_size < 22 {
-            return Err(keramics_core::error_trace_new!(
-                "Unsupported data size too small for end of central directory record"
-            ));
-        }
-        let (eocd_offset, eocd) = match self.find_end_of_central_directory(data_stream, file_size) {
-            Ok(record) => record,
-            Err(mut error) => {
-                keramics_core::error_trace_add_frame!(
-                    error,
-                    "Unable to find end of central directory record"
-                );
-                return Err(error);
-            }
-        };
-        let (central_directory_offset, central_directory_size, number_of_entries) = match self
-            .read_end_of_central_directory_record(data_stream, &eocd, eocd_offset, file_size)
-        {
-            Ok(record) => record,
-            Err(mut error) => {
-                keramics_core::error_trace_add_frame!(
-                    error,
-                    "Unable to read end of central directory record"
-                );
-                return Err(error);
-            }
-        };
-        if central_directory_size != 0
-            && central_directory_offset + central_directory_size > file_size
-        {
-            return Err(keramics_core::error_trace_new!(
-                "Unsupported central directory size value out of bounds"
-            ));
-        }
-        match self.read_entries(data_stream, central_directory_offset, number_of_entries) {
-            Ok(_) => {}
-            Err(mut error) => {
-                keramics_core::error_trace_add_frame!(
-                    error,
-                    "Unable to read central directory entries"
-                );
-                return Err(error);
-            }
-        }
-        if eocd.file_comment_length != 0 {
-            let mut comment_data: Vec<u8> = vec![0; eocd.file_comment_length as usize];
-
-            keramics_core::data_stream_read_exact_at_position!(
-                data_stream,
-                &mut comment_data,
-                SeekFrom::Start(eocd_offset + 22)
-            );
-            self.file_comment = match String::from_utf8(comment_data) {
-                Ok(string) => string,
-                Err(error) => {
-                    return Err(keramics_core::error_trace_new!(format!(
-                        "Unsupported encoding of Zip file comment with error: {}",
-                        error
-                    )));
-                }
-            };
-        }
-        self.data_stream = Some(data_stream.clone());
-
-        Ok(())
-    }
-
-    /// Reads the central directory entries.
-    fn read_entries(
-        &mut self,
-        data_stream: &DataStreamReference,
-        central_directory_offset: u64,
-        number_of_entries: u64,
-    ) -> Result<(), ErrorTrace> {
-        let mut entry_offset: u64 = central_directory_offset;
-
-        for _ in 0..number_of_entries {
-            let mut entry: ZipEntry = ZipEntry::new();
-
-            match entry.read_at_position(data_stream, SeekFrom::Start(entry_offset)) {
-                Ok(_) => {}
-                Err(mut error) => {
-                    keramics_core::error_trace_add_frame!(
-                        error,
-                        format!(
-                            "Unable to read central directory entry at offset: {} (0x{:08x})",
-                            entry_offset, entry_offset
-                        )
-                    );
-                    return Err(error);
-                }
-            }
-            let file_name_length: usize = entry.file_name_length as usize;
-
-            if file_name_length != 0 {
-                let mut file_name_data: Vec<u8> = vec![0; file_name_length];
-
-                keramics_core::data_stream_read_exact_at_position!(
-                    data_stream,
-                    &mut file_name_data,
-                    SeekFrom::Start(entry_offset + 46)
-                );
-                entry.file_name = match String::from_utf8(file_name_data) {
-                    Ok(string) => string,
-                    Err(error) => {
-                        return Err(keramics_core::error_trace_new!(format!(
-                            "Unsupported encoding of entry file name with error: {}",
-                            error
-                        )));
-                    }
-                };
-            }
-            let entry_length: u64 = 46
-                + (entry.file_name_length as u64)
-                + (entry.extra_field_length as u64)
-                + (entry.file_comment_length as u64);
-            self.entries.push(entry);
-            entry_offset += entry_length;
-        }
-        Ok(())
-    }
-
-    /// Finds the end of central directory record, which is located at the end
-    /// of the file and is followed by the Zip file comment (if present).
-    fn find_end_of_central_directory(
-        &self,
-        data_stream: &DataStreamReference,
-        file_size: u64,
-    ) -> Result<(u64, ZipEndOfCentralDirectoryRecord), ErrorTrace> {
-        let search_start_offset: u64 = file_size.saturating_sub(22 + 65535);
-
-        let mut eocd_offset: u64 = file_size - 22;
-
-        loop {
-            let mut eocd: ZipEndOfCentralDirectoryRecord = ZipEndOfCentralDirectoryRecord::new();
-
-            if eocd
-                .read_at_position(data_stream, SeekFrom::Start(eocd_offset))
-                .is_ok()
-                && eocd_offset + 22 + (eocd.file_comment_length as u64) == file_size
-            {
-                return Ok((eocd_offset, eocd));
-            }
-            if eocd_offset <= search_start_offset {
-                break;
-            }
-            eocd_offset -= 1;
-        }
-        Err(keramics_core::error_trace_new!(
-            "Missing end of central directory record"
-        ))
-    }
-
-    /// Reads the zip64 end of central directory records (if present) and
-    /// retrieves the offsets and sizes of the central directory.
-    fn read_end_of_central_directory_record(
-        &mut self,
-        data_stream: &DataStreamReference,
-        eocd: &ZipEndOfCentralDirectoryRecord,
-        eocd_offset: u64,
-        file_size: u64,
-    ) -> Result<(u64, u64, u64), ErrorTrace> {
-        let mut central_directory_offset: u64 = eocd.central_directory_offset as u64;
-        let mut central_directory_size: u64 = eocd.central_directory_size as u64;
-        let mut number_of_entries: u64 = eocd.number_of_entries as u64;
-
-        if eocd.number_of_entries == 0xffff
-            || eocd.central_directory_size == 0xffffffff
-            || eocd.central_directory_offset == 0xffffffff
-        {
-            if eocd_offset < 20 {
-                return Err(keramics_core::error_trace_new!(
-                    "Missing zip64 end of central directory locator"
-                ));
-            }
-            let mut eocd64_locator: Zip64EndOfCentralDirectoryLocator =
-                Zip64EndOfCentralDirectoryLocator::new();
-
-            match eocd64_locator.read_at_position(data_stream, SeekFrom::Start(eocd_offset - 20)) {
-                Ok(_) => {}
-                Err(mut error) => {
-                    keramics_core::error_trace_add_frame!(
-                        error,
-                        "Unable to read zip64 end of central directory locator"
-                    );
-                    return Err(error);
-                }
-            }
-            if eocd64_locator.eocd64_offset + 56 > file_size
-                || eocd64_locator.eocd64_offset >= eocd_offset
-            {
-                return Err(keramics_core::error_trace_new!(
-                    "Unsupported zip64 end of central directory record offset value out of bounds"
-                ));
-            }
-            let mut eocd64: Zip64EndOfCentralDirectoryRecord =
-                Zip64EndOfCentralDirectoryRecord::new();
-
-            match eocd64
-                .read_at_position(data_stream, SeekFrom::Start(eocd64_locator.eocd64_offset))
-            {
-                Ok(_) => {}
-                Err(mut error) => {
-                    keramics_core::error_trace_add_frame!(
-                        error,
-                        format!(
-                            "Unable to read zip64 end of central directory record at offset: {} (0x{:08x})",
-                            eocd64_locator.eocd64_offset, eocd64_locator.eocd64_offset
-                        )
-                    );
-                    return Err(error);
-                }
-            }
-            number_of_entries = eocd64.number_of_entries;
-            central_directory_size = eocd64.central_directory_size;
-            central_directory_offset = eocd64.central_directory_offset;
-        }
-        Ok((
-            central_directory_offset,
-            central_directory_size,
-            number_of_entries,
-        ))
     }
 }
 

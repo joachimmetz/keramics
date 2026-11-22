@@ -92,22 +92,6 @@ impl Aff4File {
         &self.zip_file
     }
 
-    /// Retrieves the Zip file and moves it out.
-    pub fn take_zip_file(&mut self) -> ZipFile {
-        let zip_file: ZipFile = self.zip_file.clone();
-        self.zip_file = ZipFile::new();
-
-        zip_file
-    }
-
-    /// Retrieves the information container and moves it out.
-    pub fn take_information(&mut self) -> Aff4Information {
-        let information: Aff4Information = self.information.clone();
-        self.information = Aff4Information::new();
-
-        information
-    }
-
     /// Determines if the volume uses the standard AFF4 representation.
     pub fn is_standard(&self) -> bool {
         self.is_standard
@@ -151,32 +135,6 @@ impl Aff4File {
         self.data_stream = Some(data_stream);
 
         Ok(())
-    }
-
-    /// Reads the data of an entry from the volume.
-    fn read_entry_data(&mut self, file_name: &str) -> Result<Vec<u8>, ErrorTrace> {
-        let entry: ZipEntry = match self.zip_file.get_entry(file_name) {
-            Some(entry) => entry.clone(),
-            None => {
-                return Err(keramics_core::error_trace_new!(format!(
-                    "Missing entry: {} in volume",
-                    file_name
-                )));
-            }
-        };
-        let mut data: Vec<u8> = vec![0; entry.uncompressed_size as usize];
-
-        match self.zip_file.read_entry_data(&entry, &mut data) {
-            Ok(_) => {}
-            Err(mut error) => {
-                keramics_core::error_trace_add_frame!(
-                    error,
-                    format!("Unable to read entry data of entry: {}", file_name)
-                );
-                return Err(error);
-            }
-        }
-        Ok(data)
     }
 
     /// Reads the AFF4 file.
@@ -293,6 +251,48 @@ impl Aff4File {
         self.is_standard = is_standard;
 
         Ok(())
+    }
+
+    /// Reads the data of an entry from the volume.
+    fn read_entry_data(&mut self, file_name: &str) -> Result<Vec<u8>, ErrorTrace> {
+        let entry: ZipEntry = match self.zip_file.get_entry(file_name) {
+            Some(entry) => entry.clone(),
+            None => {
+                return Err(keramics_core::error_trace_new!(format!(
+                    "Missing entry: {} in volume",
+                    file_name
+                )));
+            }
+        };
+        let mut data: Vec<u8> = vec![0; entry.uncompressed_size as usize];
+
+        match self.zip_file.read_entry_data(&entry, &mut data) {
+            Ok(_) => {}
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(
+                    error,
+                    format!("Unable to read entry data of entry: {}", file_name)
+                );
+                return Err(error);
+            }
+        }
+        Ok(data)
+    }
+
+    /// Retrieves the information container and moves it out.
+    pub fn take_information(&mut self) -> Aff4Information {
+        let information: Aff4Information = self.information.clone();
+        self.information = Aff4Information::new();
+
+        information
+    }
+
+    /// Retrieves the Zip file and moves it out.
+    pub fn take_zip_file(&mut self) -> ZipFile {
+        let zip_file: ZipFile = self.zip_file.clone();
+        self.zip_file = ZipFile::new();
+
+        zip_file
     }
 }
 

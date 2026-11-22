@@ -11,23 +11,23 @@
  * under the License.
  */
 
-/// Zip compression method value for stored (no compression)
+/// Zip compression method value for stored (no compression).
 pub const ZIP_COMPRESSION_METHOD_STORED: u16 = 0;
 
-/// Zip compression method value for deflate
+/// Zip compression method value for deflate.
 pub const ZIP_COMPRESSION_METHOD_DEFLATE: u16 = 8;
 
-/// Zip central directory header signature
+/// Zip central directory header signature.
 pub const ZIP_CENTRAL_DIRECTORY_HEADER_SIGNATURE: &[u8] = b"PK\x01\x02";
 
-/// Zip local file header signature
+/// Zip local file header signature.
 pub const ZIP_LOCAL_FILE_HEADER_SIGNATURE: &[u8] = b"PK\x03\x04";
 
-/// Zip end of central directory record signature
+/// Zip end of central directory record signature.
 pub const ZIP_END_OF_CENTRAL_DIRECTORY_RECORD_SIGNATURE: &[u8] = b"PK\x05\x06";
 
-/// Zip64 end of central directory record signature
+/// Zip64 end of central directory record signature.
 pub const ZIP64_END_OF_CENTRAL_DIRECTORY_RECORD_SIGNATURE: &[u8] = b"PK\x06\x06";
 
-/// Zip64 end of central directory locator signature
+/// Zip64 end of central directory locator signature.
 pub const ZIP64_END_OF_CENTRAL_DIRECTORY_LOCATOR_SIGNATURE: &[u8] = b"PK\x06\x07";

@@ -61,7 +61,19 @@ fn read_value_64bit(
     data_stream: &DataStreamReference,
     segment: &AffSegment,
 ) -> Result<u64, ErrorTrace> {
-    let data: Vec<u8> = read_segment_data(data_stream, segment)?;
+    let data: Vec<u8> = match read_segment_data(data_stream, segment) {
+        Ok(data) => data,
+        Err(mut error) => {
+            keramics_core::error_trace_add_frame!(
+                error,
+                format!(
+                    "Unable to read segment data of segment: {}",
+                    segment.get_name()
+                )
+            );
+            return Err(error);
+        }
+    };
 
     if data.len() >= 8 {
         let mut low_data: [u8; 4] = [0; 4];
@@ -127,6 +139,69 @@ impl AffFile {
             number_of_pages: 0,
             number_of_bad_sectors: 0,
             bad_flag: Vec::new(),
+        }
+    }
+
+    /// Retrieves the pattern used to mark a bad sector.
+    pub fn get_bad_flag(&self) -> &[u8] {
+        &self.bad_flag
+    }
+
+    /// Retrieves the number of bytes per sector.
+    pub fn get_bytes_per_sector(&self) -> u32 {
+        self.bytes_per_sector
+    }
+
+    /// Retrieves the media size in bytes.
+    pub fn get_media_size(&self) -> u64 {
+        self.media_size
+    }
+
+    /// Retrieves the number of bad sectors.
+    pub fn get_number_of_bad_sectors(&self) -> u64 {
+        self.number_of_bad_sectors
+    }
+
+    /// Determines the number of stored pages of the image.
+    pub fn get_number_of_pages(&self) -> usize {
+        self.number_of_pages
+    }
+
+    /// Determines the number of parsed segments.
+    pub fn get_number_of_segments(&self) -> usize {
+        self.segments.len()
+    }
+
+    /// Retrieves the page size in bytes.
+    pub fn get_page_size(&self) -> u64 {
+        self.page_size
+    }
+
+    /// Retrieves a segment.
+    pub fn get_segment(&self, name: &str) -> Option<&AffSegment> {
+        self.segments.get(name)
+    }
+
+    /// Retrieves the data of a segment.
+    pub fn get_segment_data(&self, name: &str) -> Result<Vec<u8>, ErrorTrace> {
+        let segment: &AffSegment = match self.get_segment(name) {
+            Some(segment) => segment,
+            None => {
+                return Err(keramics_core::error_trace_new!(format!(
+                    "Missing segment: {}",
+                    name
+                )));
+            }
+        };
+        match read_segment_data(&self.data_stream, segment) {
+            Ok(data) => Ok(data),
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(
+                    error,
+                    format!("Unable to read segment data of segment: {}", name)
+                );
+                Err(error)
+            }
         }
     }
 
@@ -294,12 +369,30 @@ impl AffFile {
             // The "segsize" name is the deprecated name for "pagesize".
             Some(segment) if segment.get_flag() != 0 => segment.get_flag() as u64,
             Some(segment) if segment.get_data_length() >= 4 => {
-                read_value_64bit(data_stream, segment)?
+                match read_value_64bit(data_stream, segment) {
+                    Ok(value) => value,
+                    Err(mut error) => {
+                        keramics_core::error_trace_add_frame!(
+                            error,
+                            "Unable to read pagesize value"
+                        );
+                        return Err(error);
+                    }
+                }
             }
             _ => match segments.get("segsize") {
                 Some(segment) if segment.get_flag() != 0 => segment.get_flag() as u64,
                 Some(segment) if segment.get_data_length() >= 4 => {
-                    read_value_64bit(data_stream, segment)?
+                    match read_value_64bit(data_stream, segment) {
+                        Ok(value) => value,
+                        Err(mut error) => {
+                            keramics_core::error_trace_add_frame!(
+                                error,
+                                "Unable to read segsize value"
+                            );
+                            return Err(error);
+                        }
+                    }
                 }
                 _ => AFF_DEFAULT_PAGE_SIZE,
             },
@@ -307,7 +400,16 @@ impl AffFile {
         let bytes_per_sector: u32 = match segments.get("sectorsize") {
             Some(segment) if segment.get_flag() != 0 => segment.get_flag(),
             Some(segment) if segment.get_data_length() >= 4 => {
-                read_value_64bit(data_stream, segment)? as u32
+                match read_value_64bit(data_stream, segment) {
+                    Ok(value) => value as u32,
+                    Err(mut error) => {
+                        keramics_core::error_trace_add_frame!(
+                            error,
+                            "Unable to read sectorsize value"
+                        );
+                        return Err(error);
+                    }
+                }
             }
             _ => AFF_DEFAULT_BYTES_PER_SECTOR,
         };
@@ -345,69 +447,6 @@ impl AffFile {
         self.bad_flag = bad_flag;
 
         Ok(())
-    }
-
-    /// Retrieves the number of bytes per sector.
-    pub fn get_bytes_per_sector(&self) -> u32 {
-        self.bytes_per_sector
-    }
-
-    /// Retrieves the pattern used to mark a bad sector.
-    pub fn get_bad_flag(&self) -> &[u8] {
-        &self.bad_flag
-    }
-
-    /// Retrieves the media size in bytes.
-    pub fn get_media_size(&self) -> u64 {
-        self.media_size
-    }
-
-    /// Retrieves the number of bad sectors.
-    pub fn get_number_of_bad_sectors(&self) -> u64 {
-        self.number_of_bad_sectors
-    }
-
-    /// Determines the number of parsed segments.
-    pub fn get_number_of_segments(&self) -> usize {
-        self.segments.len()
-    }
-
-    /// Determines the number of stored pages of the image.
-    pub fn get_number_of_pages(&self) -> usize {
-        self.number_of_pages
-    }
-
-    /// Retrieves the page size in bytes.
-    pub fn get_page_size(&self) -> u64 {
-        self.page_size
-    }
-
-    /// Retrieves a segment.
-    pub fn get_segment(&self, name: &str) -> Option<&AffSegment> {
-        self.segments.get(name)
-    }
-
-    /// Retrieves the data of a segment.
-    pub fn get_segment_data(&self, name: &str) -> Result<Vec<u8>, ErrorTrace> {
-        let segment: &AffSegment = match self.get_segment(name) {
-            Some(segment) => segment,
-            None => {
-                return Err(keramics_core::error_trace_new!(format!(
-                    "Missing segment: {}",
-                    name
-                )));
-            }
-        };
-        match read_segment_data(&self.data_stream, segment) {
-            Ok(data) => Ok(data),
-            Err(mut error) => {
-                keramics_core::error_trace_add_frame!(
-                    error,
-                    format!("Unable to read segment data of segment: {}", name)
-                );
-                Err(error)
-            }
-        }
     }
 }
 

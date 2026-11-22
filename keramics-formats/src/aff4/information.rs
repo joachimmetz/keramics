@@ -65,21 +65,17 @@ impl Aff4NodeProperty {
 }
 
 impl Aff4Node {
-    /// Determines if the node has the type with the specified prefix local name (for example `Image`).
-    pub fn is_type(&self, type_name: &str) -> bool {
-        self.types.iter().any(|node_type| node_type == type_name)
-    }
-
-    /// Determines if the subject of the node is an absolute IRI.
-    pub fn has_iri_subject(&self) -> bool {
-        self.subject.contains("://")
-    }
-
     /// Retrieves the property with the specified local name.
     pub fn get_property(&self, name: &str) -> Option<&Aff4NodeProperty> {
         self.properties
             .iter()
             .find(|property| property.name == name)
+    }
+
+    /// Retrieves the first value of the property with the specified local name.
+    pub fn get_property_value(&self, name: &str) -> Option<&str> {
+        self.get_property(name)
+            .and_then(|property| property.get_value())
     }
 
     /// Retrieves the values of the property with the specified local name.
@@ -90,17 +86,21 @@ impl Aff4Node {
         }
     }
 
-    /// Retrieves the first value of the property with the specified local name.
-    pub fn get_property_value(&self, name: &str) -> Option<&str> {
-        self.get_property(name)
-            .and_then(|property| property.get_value())
-    }
-
     /// Retrieves an integer property value (for example `aff4:size`).
     pub fn get_u64_property(&self, name: &str) -> Option<u64> {
         self.get_property_value(name)
             .map(|value| value.trim())
             .and_then(|value| value.parse::<u64>().ok())
+    }
+
+    /// Determines if the subject of the node is an absolute IRI.
+    pub fn has_iri_subject(&self) -> bool {
+        self.subject.contains("://")
+    }
+
+    /// Determines if the node has the type with the specified prefix local name (for example `Image`).
+    pub fn is_type(&self, type_name: &str) -> bool {
+        self.types.iter().any(|node_type| node_type == type_name)
     }
 }
 
@@ -135,6 +135,15 @@ impl Aff4Information {
         }
     }
 
+    /// Retrieves the first IRI in the data.
+    fn extract_iri(data: &str) -> Option<&str> {
+        let start: usize = data.find('<')?;
+        let rest: &str = &data[start + 1..];
+        let end: usize = rest.find('>')?;
+
+        Some(&rest[..end])
+    }
+
     /// Determines if the information container describes a standard AFF4 (for example AFF4 Standard v1.0a) volume.
     ///
     /// A standard volume is indicated by the presence of `Map` or
@@ -148,115 +157,6 @@ impl Aff4Information {
                 .nodes
                 .iter()
                 .any(|node| node.is_type("Image") && node.has_iri_subject())
-    }
-
-    /// Retrieves the first IRI in the data.
-    fn extract_iri(data: &str) -> Option<&str> {
-        let start: usize = data.find('<')?;
-        let rest: &str = &data[start + 1..];
-        let end: usize = rest.find('>')?;
-
-        Some(&rest[..end])
-    }
-
-    /// Tokenizes the statement body into parse tokens.
-    ///
-    /// IRIs are returned with their enclosing angle brackets, string literals
-    /// without their enclosing quotes and datatype annotations, and the
-    /// statement punctuation (`;`, `.`, `,`, `(`, `)`) as single tokens.
-    fn tokenize(data: &str) -> Vec<String> {
-        let mut tokens: Vec<String> = Vec::new();
-        let chars: Vec<char> = data.chars().collect();
-        let mut index: usize = 0;
-
-        while index < chars.len() {
-            let ch: char = chars[index];
-
-            if ch.is_whitespace() {
-                index += 1;
-                continue;
-            }
-            match ch {
-                '<' => {
-                    let start: usize = index;
-                    index += 1;
-                    while index < chars.len() && chars[index] != '>' {
-                        index += 1;
-                    }
-                    if index >= chars.len() {
-                        return tokens;
-                    }
-                    let iri: String = chars[(start + 1)..index].iter().collect();
-                    index += 1;
-                    tokens.push(format!("<{}>", iri));
-                }
-                '"' => {
-                    let start: usize = index;
-                    index += 1;
-                    while index < chars.len() && chars[index] != '"' {
-                        index += 1;
-                    }
-                    if index >= chars.len() {
-                        return tokens;
-                    }
-                    let value: String = chars[start + 1..index].iter().collect();
-                    index += 1;
-                    // Remove an attached datatype annotation such as
-                    // `^^xsd:long` or `^^aff4:SHA1`.
-                    if index + 1 < chars.len() && chars[index] == '^' && chars[index + 1] == '^' {
-                        index += 2;
-                        while index < chars.len()
-                            && (chars[index].is_ascii_alphanumeric()
-                                || chars[index] == '_'
-                                || chars[index] == '-'
-                                || chars[index] == ':'
-                                || chars[index] == '.')
-                        {
-                            index += 1;
-                        }
-                    }
-                    tokens.push(value);
-                }
-                ';' | '.' | ',' | '(' | ')' => {
-                    tokens.push(ch.to_string());
-                    index += 1;
-                }
-                _ => {
-                    let mut token: String = String::new();
-                    while index < chars.len()
-                        && !chars[index].is_whitespace()
-                        && !matches!(chars[index], '<' | '"' | ';' | '.' | ',' | '(' | ')')
-                    {
-                        token.push(chars[index]);
-                        index += 1;
-                    }
-                    if token.is_empty() {
-                        index += 1;
-                    } else {
-                        tokens.push(token);
-                    }
-                }
-            }
-        }
-        tokens
-    }
-
-    /// Retrieves the prefix local name of a predicate token.
-    fn predicate_local_name(predicate: &str) -> String {
-        if predicate.starts_with('<') && predicate.ends_with('>') {
-            let iri: &str = &predicate[1..predicate.len() - 1];
-            if let Some(hash_pos) = iri.rfind('#') {
-                return iri[hash_pos + 1..].to_string();
-            }
-            if let Some(slash_pos) = iri.rfind('/') {
-                return iri[slash_pos + 1..].to_string();
-            }
-            return iri.to_string();
-        }
-        if let Some(colon_pos) = predicate.rfind(':') {
-            return predicate[colon_pos + 1..].to_string();
-        }
-        predicate.to_string()
     }
 
     /// Retrieves the value of an object token.
@@ -353,6 +253,24 @@ impl Aff4Information {
         nodes
     }
 
+    /// Retrieves the prefix local name of a predicate token.
+    fn predicate_local_name(predicate: &str) -> String {
+        if predicate.starts_with('<') && predicate.ends_with('>') {
+            let iri: &str = &predicate[1..predicate.len() - 1];
+            if let Some(hash_pos) = iri.rfind('#') {
+                return iri[hash_pos + 1..].to_string();
+            }
+            if let Some(slash_pos) = iri.rfind('/') {
+                return iri[slash_pos + 1..].to_string();
+            }
+            return iri.to_string();
+        }
+        if let Some(colon_pos) = predicate.rfind(':') {
+            return predicate[colon_pos + 1..].to_string();
+        }
+        predicate.to_string()
+    }
+
     /// Reads the information container from a buffer.
     pub fn read_data(&mut self, data: &[u8]) -> Result<(), ErrorTrace> {
         let content: String = match String::from_utf8(data.to_vec()) {
@@ -425,6 +343,88 @@ impl Aff4Information {
 
         Ok(())
     }
+
+    /// Tokenizes the statement body into parse tokens.
+    ///
+    /// IRIs are returned with their enclosing angle brackets, string literals
+    /// without their enclosing quotes and datatype annotations, and the
+    /// statement punctuation (`;`, `.`, `,`, `(`, `)`) as single tokens.
+    fn tokenize(data: &str) -> Vec<String> {
+        let mut tokens: Vec<String> = Vec::new();
+        let chars: Vec<char> = data.chars().collect();
+        let mut index: usize = 0;
+
+        while index < chars.len() {
+            let ch: char = chars[index];
+
+            if ch.is_whitespace() {
+                index += 1;
+                continue;
+            }
+            match ch {
+                '<' => {
+                    let start: usize = index;
+                    index += 1;
+                    while index < chars.len() && chars[index] != '>' {
+                        index += 1;
+                    }
+                    if index >= chars.len() {
+                        return tokens;
+                    }
+                    let iri: String = chars[(start + 1)..index].iter().collect();
+                    index += 1;
+                    tokens.push(format!("<{}>", iri));
+                }
+                '"' => {
+                    let start: usize = index;
+                    index += 1;
+                    while index < chars.len() && chars[index] != '"' {
+                        index += 1;
+                    }
+                    if index >= chars.len() {
+                        return tokens;
+                    }
+                    let value: String = chars[start + 1..index].iter().collect();
+                    index += 1;
+                    // Remove an attached datatype annotation such as
+                    // `^^xsd:long` or `^^aff4:SHA1`.
+                    if index + 1 < chars.len() && chars[index] == '^' && chars[index + 1] == '^' {
+                        index += 2;
+                        while index < chars.len()
+                            && (chars[index].is_ascii_alphanumeric()
+                                || chars[index] == '_'
+                                || chars[index] == '-'
+                                || chars[index] == ':'
+                                || chars[index] == '.')
+                        {
+                            index += 1;
+                        }
+                    }
+                    tokens.push(value);
+                }
+                ';' | '.' | ',' | '(' | ')' => {
+                    tokens.push(ch.to_string());
+                    index += 1;
+                }
+                _ => {
+                    let mut token: String = String::new();
+                    while index < chars.len()
+                        && !chars[index].is_whitespace()
+                        && !matches!(chars[index], '<' | '"' | ';' | '.' | ',' | '(' | ')')
+                    {
+                        token.push(chars[index]);
+                        index += 1;
+                    }
+                    if token.is_empty() {
+                        index += 1;
+                    } else {
+                        tokens.push(token);
+                    }
+                }
+            }
+        }
+        tokens
+    }
 }
 
 #[cfg(test)]
@@ -445,7 +445,7 @@ mod tests {
     fn test_read_data() -> Result<(), ErrorTrace> {
         let test_data: Vec<u8> = get_test_data();
 
-        let mut test_struct = Aff4Information::new();
+        let mut test_struct: Aff4Information = Aff4Information::new();
         test_struct.read_data(&test_data)?;
 
         assert_eq!(
@@ -463,7 +463,7 @@ mod tests {
     fn test_read_data_with_single_line_statement() -> Result<(), ErrorTrace> {
         let data: &[u8] = b"@base <aff4://00000000-0000-1003-8000-000000000004> .\n<test.ext2.raw> a aff4:DiskImage .\n";
 
-        let mut test_struct = Aff4Information::new();
+        let mut test_struct: Aff4Information = Aff4Information::new();
         test_struct.read_data(data)?;
 
         assert_eq!(test_struct.image_names, vec!["test.ext2.raw".to_string()]);
@@ -475,7 +475,7 @@ mod tests {
     fn test_read_data_with_multiple_images() -> Result<(), ErrorTrace> {
         let data: &[u8] = b"@base <aff4://00000000-0000-1003-8000-000000000004> .\n</test1.raw> a aff4:Image .\n</test2.raw> a aff4:DiskImage .\n</test1.raw> a aff4:Image .\n";
 
-        let mut test_struct = Aff4Information::new();
+        let mut test_struct: Aff4Information = Aff4Information::new();
         test_struct.read_data(data)?;
 
         assert_eq!(
@@ -491,7 +491,7 @@ mod tests {
         // Subjects with an absolute IRI are not entry names.
         let data: &[u8] = b"@base <aff4://00000000-0000-1003-8000-000000000004> .\n<aff4://00000000-0000-1003-8000-000000000004/test.raw> a aff4:Image .\n";
 
-        let mut test_struct = Aff4Information::new();
+        let mut test_struct: Aff4Information = Aff4Information::new();
         test_struct.read_data(data)?;
 
         assert!(test_struct.image_names.is_empty());
@@ -503,7 +503,7 @@ mod tests {
     fn test_read_data_with_missing_base() -> Result<(), ErrorTrace> {
         let data: &[u8] = b"@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n";
 
-        let mut test_struct = Aff4Information::new();
+        let mut test_struct: Aff4Information = Aff4Information::new();
         test_struct.read_data(data)?;
 
         assert!(test_struct.volume_uri.is_empty());
@@ -516,8 +516,8 @@ mod tests {
     fn test_read_data_with_unsupported_encoding() {
         let data: &[u8] = &[0xff, 0xfe, 0xfd, 0xfc];
 
-        let mut test_struct = Aff4Information::new();
-        let result = test_struct.read_data(data);
+        let mut test_struct: Aff4Information = Aff4Information::new();
+        let result: Result<(), ErrorTrace> = test_struct.read_data(data);
         assert!(result.is_err());
     }
 
@@ -525,8 +525,8 @@ mod tests {
     fn test_read_data_with_unsupported_base_directive() {
         let data: &[u8] = b"@base not_an_iri .\n";
 
-        let mut test_struct = Aff4Information::new();
-        let result = test_struct.read_data(data);
+        let mut test_struct: Aff4Information = Aff4Information::new();
+        let result: Result<(), ErrorTrace> = test_struct.read_data(data);
         assert!(result.is_err());
     }
 
@@ -534,7 +534,7 @@ mod tests {
     fn test_read_data_with_standard_volume() -> Result<(), ErrorTrace> {
         let data: Vec<u8> = get_standard_data();
 
-        let mut test_struct = Aff4Information::new();
+        let mut test_struct: Aff4Information = Aff4Information::new();
         test_struct.read_data(&data)?;
 
         assert_eq!(
@@ -611,7 +611,7 @@ mod tests {
     fn test_read_data_with_split_volume() -> Result<(), ErrorTrace> {
         let data: &[u8] = b"@base <aff4://00000000-0000-1003-8000-000000000004> .\n@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n@prefix aff4: <http://aff4.org/Schema#> .\n@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .\n\n</file:/tmp/keramics_aff4_split.raw>\n    aff4:size 0 ;\n    aff4:stored <> ;\n    a aff4:ImageStream .\n";
 
-        let mut test_struct = Aff4Information::new();
+        let mut test_struct: Aff4Information = Aff4Information::new();
         test_struct.read_data(data)?;
 
         // An `ImageStream` typed node is not included in the legacy image
@@ -626,13 +626,13 @@ mod tests {
     fn test_is_standard() -> Result<(), ErrorTrace> {
         let test_data: Vec<u8> = get_test_data();
 
-        let mut test_struct = Aff4Information::new();
+        let mut test_struct: Aff4Information = Aff4Information::new();
         test_struct.read_data(&test_data)?;
 
         assert!(!test_struct.is_standard());
 
         let standard_data: Vec<u8> = get_standard_data();
-        let mut standard_test_struct = Aff4Information::new();
+        let mut standard_test_struct: Aff4Information = Aff4Information::new();
         standard_test_struct.read_data(&standard_data)?;
 
         assert!(standard_test_struct.is_standard());

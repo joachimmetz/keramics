@@ -69,14 +69,14 @@ impl AffImage {
         }
     }
 
-    /// Retrieves the number of bytes per sector.
-    pub fn get_bytes_per_sector(&self) -> u32 {
-        self.bytes_per_sector
-    }
-
     /// Retrieves the pattern used to mark a bad sector.
     pub fn get_bad_flag(&self) -> &[u8] {
         self.aff_file.get_bad_flag()
+    }
+
+    /// Retrieves the number of bytes per sector.
+    pub fn get_bytes_per_sector(&self) -> u32 {
+        self.bytes_per_sector
     }
 
     /// Retrieves a data stream.
@@ -86,14 +86,14 @@ impl AffImage {
         ))))
     }
 
-    /// Retrieves the name.
-    pub fn get_name(&self) -> &str {
-        &self.name
-    }
-
     /// Retrieves the media size.
     pub fn get_media_size(&self) -> u64 {
         self.media_size
+    }
+
+    /// Retrieves the name.
+    pub fn get_name(&self) -> &str {
+        &self.name
     }
 
     /// Determines the number of bad sectors.
@@ -101,14 +101,19 @@ impl AffImage {
         self.aff_file.get_number_of_bad_sectors()
     }
 
+    /// Determines the number of stored pages of the image.
+    pub fn get_number_of_pages(&self) -> usize {
+        self.number_of_pages
+    }
+
     /// Determines the number of segments of the image.
     pub fn get_number_of_segments(&self) -> usize {
         self.aff_file.get_number_of_segments()
     }
 
-    /// Determines the number of stored pages of the image.
-    pub fn get_number_of_pages(&self) -> usize {
-        self.number_of_pages
+    /// Retrieves the page size.
+    pub fn get_page_size(&self) -> u64 {
+        self.page_size
     }
 
     /// Retrieves the data of an image segment.
@@ -123,11 +128,6 @@ impl AffImage {
                 Err(error)
             }
         }
-    }
-
-    /// Retrieves the page size.
-    pub fn get_page_size(&self) -> u64 {
-        self.page_size
     }
 
     /// Opens a storage media image.
@@ -168,7 +168,6 @@ mod tests {
     use keramics_core::{DataStreamReference, open_os_data_stream};
 
     use crate::os_file_resolver::OsFileResolver;
-
     use crate::tests::get_test_data_path;
 
     fn get_image() -> Result<AffImage, ErrorTrace> {

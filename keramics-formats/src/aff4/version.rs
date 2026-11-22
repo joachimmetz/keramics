@@ -110,7 +110,7 @@ mod tests {
     fn test_read_data() -> Result<(), ErrorTrace> {
         let data: &[u8] = b"major=1\nminor=0\ntool=libaff4 2.0 pre-release\n";
 
-        let mut test_struct = Aff4Version::new();
+        let mut test_struct: Aff4Version = Aff4Version::new();
         test_struct.read_data(data)?;
 
         assert_eq!(test_struct.major, 1);
@@ -122,12 +122,12 @@ mod tests {
 
     #[test]
     fn test_is_supported() {
-        let mut test_struct = Aff4Version::new();
+        let mut test_struct: Aff4Version = Aff4Version::new();
         let data: &[u8] = b"major=1\nminor=2\ntool=libaff4\n";
         test_struct.read_data(data).unwrap();
         assert!(test_struct.is_supported());
 
-        let mut test_struct = Aff4Version::new();
+        let mut test_struct: Aff4Version = Aff4Version::new();
         let data: &[u8] = b"major=2\nminor=0\ntool=libaff4\n";
         test_struct.read_data(data).unwrap();
         assert!(!test_struct.is_supported());
@@ -137,8 +137,8 @@ mod tests {
     fn test_read_data_with_unsupported_encoding() {
         let data: &[u8] = &[0xff, 0xfe, 0xfd, 0xfc];
 
-        let mut test_struct = Aff4Version::new();
-        let result = test_struct.read_data(data);
+        let mut test_struct: Aff4Version = Aff4Version::new();
+        let result: Result<(), ErrorTrace> = test_struct.read_data(data);
         assert!(result.is_err());
     }
 
@@ -146,8 +146,8 @@ mod tests {
     fn test_read_data_with_unsupported_line() {
         let data: &[u8] = b"major\n";
 
-        let mut test_struct = Aff4Version::new();
-        let result = test_struct.read_data(data);
+        let mut test_struct: Aff4Version = Aff4Version::new();
+        let result: Result<(), ErrorTrace> = test_struct.read_data(data);
         assert!(result.is_err());
     }
 
@@ -155,8 +155,8 @@ mod tests {
     fn test_read_data_with_unsupported_major_version_value() {
         let data: &[u8] = b"major=not_a_number\n";
 
-        let mut test_struct = Aff4Version::new();
-        let result = test_struct.read_data(data);
+        let mut test_struct: Aff4Version = Aff4Version::new();
+        let result: Result<(), ErrorTrace> = test_struct.read_data(data);
         assert!(result.is_err());
     }
 }

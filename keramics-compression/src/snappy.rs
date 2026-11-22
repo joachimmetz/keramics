@@ -80,7 +80,16 @@ impl SnappyContext {
             ));
         }
         let mut offset: usize = 0;
-        let uncompressed_data_size: u64 = Self::read_varint(compressed_data, &mut offset)?;
+        let uncompressed_data_size: u64 = match Self::read_varint(compressed_data, &mut offset) {
+            Ok(uncompressed_data_size) => uncompressed_data_size,
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(
+                    error,
+                    "Unable to read uncompressed data size"
+                );
+                return Err(error);
+            }
+        };
         if uncompressed_data_size > SNAPPY_MAX_INPUT_SIZE {
             return Err(keramics_core::error_trace_new!(
                 "Invalid uncompressed data size value too large"
@@ -159,12 +168,18 @@ impl SnappyContext {
                     let copy_offset: usize = ((((tag >> 5) & 0b111) as usize) << 8)
                         | usize::from(compressed_data[offset]);
                     offset += 1;
-                    Self::validate_and_emit_copy(
+                    match Self::validate_and_emit_copy(
                         uncompressed_data,
                         output_size,
                         copy_length,
                         copy_offset,
-                    )?;
+                    ) {
+                        Ok(_) => {}
+                        Err(mut error) => {
+                            keramics_core::error_trace_add_frame!(error, "Unable to emit copy");
+                            return Err(error);
+                        }
+                    }
                     output_size += copy_length;
                 }
                 0b10 => {
@@ -177,12 +192,18 @@ impl SnappyContext {
                     let copy_offset: usize = usize::from(compressed_data[offset])
                         | (usize::from(compressed_data[offset + 1]) << 8);
                     offset += 2;
-                    Self::validate_and_emit_copy(
+                    match Self::validate_and_emit_copy(
                         uncompressed_data,
                         output_size,
                         copy_length,
                         copy_offset,
-                    )?;
+                    ) {
+                        Ok(_) => {}
+                        Err(mut error) => {
+                            keramics_core::error_trace_add_frame!(error, "Unable to emit copy");
+                            return Err(error);
+                        }
+                    }
                     output_size += copy_length;
                 }
                 _ => {
@@ -197,12 +218,18 @@ impl SnappyContext {
                         | (usize::from(compressed_data[offset + 2]) << 16)
                         | (usize::from(compressed_data[offset + 3]) << 24);
                     offset += 4;
-                    Self::validate_and_emit_copy(
+                    match Self::validate_and_emit_copy(
                         uncompressed_data,
                         output_size,
                         copy_length,
                         copy_offset,
-                    )?;
+                    ) {
+                        Ok(_) => {}
+                        Err(mut error) => {
+                            keramics_core::error_trace_add_frame!(error, "Unable to emit copy");
+                            return Err(error);
+                        }
+                    }
                     output_size += copy_length;
                 }
             }
@@ -1880,8 +1907,9 @@ mod tests {
                 .chain(b"xylo".to_vec())
                 .collect(),
             "copy4_long" => {
-                let base: Vec<u8> = "The quick brown fox jumps over the lazy dog. 0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ.".repeat(2500).as_bytes().to_vec();
-                let mut result = base.clone();
+                let base: Vec<u8> = b"The quick brown fox jumps over the lazy dog. 0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ."
+                    .repeat(2500);
+                let mut result: Vec<u8> = base.clone();
                 result.extend_from_slice(&base[10..46]);
                 result
             }

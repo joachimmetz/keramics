@@ -88,7 +88,8 @@ mod tests {
     fn test_read_data() -> Result<(), ErrorTrace> {
         let test_data: Vec<u8> = get_test_data();
 
-        let mut test_struct = Zip64EndOfCentralDirectoryLocator::new();
+        let mut test_struct: Zip64EndOfCentralDirectoryLocator =
+            Zip64EndOfCentralDirectoryLocator::new();
         test_struct.read_data(&test_data[..20])?;
 
         assert_eq!(test_struct.disk_number, 0);
@@ -102,8 +103,9 @@ mod tests {
     fn test_read_data_with_unsupported_data_size() {
         let test_data: Vec<u8> = get_test_data();
 
-        let mut test_struct = Zip64EndOfCentralDirectoryLocator::new();
-        let result = test_struct.read_data(&test_data[..19]);
+        let mut test_struct: Zip64EndOfCentralDirectoryLocator =
+            Zip64EndOfCentralDirectoryLocator::new();
+        let result: Result<(), ErrorTrace> = test_struct.read_data(&test_data[..19]);
         assert!(result.is_err());
     }
 
@@ -112,8 +114,9 @@ mod tests {
         let mut test_data: Vec<u8> = get_test_data();
         test_data[0] = 0xff;
 
-        let mut test_struct = Zip64EndOfCentralDirectoryLocator::new();
-        let result = test_struct.read_data(&test_data[..20]);
+        let mut test_struct: Zip64EndOfCentralDirectoryLocator =
+            Zip64EndOfCentralDirectoryLocator::new();
+        let result: Result<(), ErrorTrace> = test_struct.read_data(&test_data[..20]);
         assert!(result.is_err());
     }
 
@@ -122,7 +125,8 @@ mod tests {
         let test_data: Vec<u8> = get_test_data();
         let data_stream: DataStreamReference = open_fake_data_stream(&test_data);
 
-        let mut test_struct = Zip64EndOfCentralDirectoryLocator::new();
+        let mut test_struct: Zip64EndOfCentralDirectoryLocator =
+            Zip64EndOfCentralDirectoryLocator::new();
         test_struct.read_at_position(&data_stream, SeekFrom::Start(0))?;
 
         assert_eq!(test_struct.eocd64_offset, 100);

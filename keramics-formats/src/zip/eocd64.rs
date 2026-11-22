@@ -119,16 +119,16 @@ mod tests {
         vec![
             0x50, 0x4b, 0x06, 0x06, // record_size: 12 (0x000000000000000c).
             0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            // version_needed_to_extract: 45 (0x002d).
+            // Version needed to extract: 45 (0x002d).
             0x2d, 0x00, // version_made_by: 45 (0x002d).
             0x2d, 0x00, // disk_number: 0.
             0x00, 0x00, 0x00, 0x00, // disk_start_number: 0.
             0x00, 0x00, 0x00, 0x00, // number_of_entries_disk: 4.
             0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // number_of_entries: 4.
             0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            // central_directory_size: 106 (0x000000000000006a).
+            // Central directory size: 106 (0x000000000000006a).
             0x6a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            // central_directory_offset: 12345 (0x0000000000003039).
+            // Central directory offset: 12345 (0x0000000000003039).
             0x39, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ]
     }
@@ -137,7 +137,8 @@ mod tests {
     fn test_read_data() -> Result<(), ErrorTrace> {
         let test_data: Vec<u8> = get_test_data();
 
-        let mut test_struct = Zip64EndOfCentralDirectoryRecord::new();
+        let mut test_struct: Zip64EndOfCentralDirectoryRecord =
+            Zip64EndOfCentralDirectoryRecord::new();
         test_struct.read_data(&test_data[..56])?;
 
         assert_eq!(test_struct.record_size, 12);
@@ -155,8 +156,9 @@ mod tests {
     fn test_read_data_with_unsupported_data_size() {
         let test_data: Vec<u8> = get_test_data();
 
-        let mut test_struct = Zip64EndOfCentralDirectoryRecord::new();
-        let result = test_struct.read_data(&test_data[..55]);
+        let mut test_struct: Zip64EndOfCentralDirectoryRecord =
+            Zip64EndOfCentralDirectoryRecord::new();
+        let result: Result<(), ErrorTrace> = test_struct.read_data(&test_data[..55]);
         assert!(result.is_err());
     }
 
@@ -165,8 +167,9 @@ mod tests {
         let mut test_data: Vec<u8> = get_test_data();
         test_data[0] = 0xff;
 
-        let mut test_struct = Zip64EndOfCentralDirectoryRecord::new();
-        let result = test_struct.read_data(&test_data[..56]);
+        let mut test_struct: Zip64EndOfCentralDirectoryRecord =
+            Zip64EndOfCentralDirectoryRecord::new();
+        let result: Result<(), ErrorTrace> = test_struct.read_data(&test_data[..56]);
         assert!(result.is_err());
     }
 
@@ -175,7 +178,8 @@ mod tests {
         let test_data: Vec<u8> = get_test_data();
         let data_stream: DataStreamReference = open_fake_data_stream(&test_data);
 
-        let mut test_struct = Zip64EndOfCentralDirectoryRecord::new();
+        let mut test_struct: Zip64EndOfCentralDirectoryRecord =
+            Zip64EndOfCentralDirectoryRecord::new();
         test_struct.read_at_position(&data_stream, SeekFrom::Start(0))?;
 
         assert_eq!(test_struct.number_of_entries, 4);

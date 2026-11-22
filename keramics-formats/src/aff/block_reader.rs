@@ -67,7 +67,16 @@ impl AffBlockReader {
         let segment_name: String = format!("page{}", page_index);
         let segment: Option<AffSegment> = self.file.get_segment(segment_name.as_str()).cloned();
         let page: Vec<u8> = match segment {
-            Some(segment) => self.read_page_data(&segment)?,
+            Some(segment) => match self.read_page_data(&segment) {
+                Ok(page) => page,
+                Err(mut error) => {
+                    keramics_core::error_trace_add_frame!(
+                        error,
+                        format!("Unable to read page data of page: {}", page_index)
+                    );
+                    return Err(error);
+                }
+            },
             None => vec![0; self.page_size as usize],
         };
         self.page_cache.insert(page_index, page.clone());
@@ -86,7 +95,19 @@ impl AffBlockReader {
             return Ok(vec![0; page_size]);
         }
         if (flag & AFF_PAGE_FLAG_COMPRESSED) == 0 {
-            let page: Vec<u8> = self.file.get_segment_data(segment.get_name())?;
+            let page: Vec<u8> = match self.file.get_segment_data(segment.get_name()) {
+                Ok(page) => page,
+                Err(mut error) => {
+                    keramics_core::error_trace_add_frame!(
+                        error,
+                        format!(
+                            "Unable to read segment data of segment: {}",
+                            segment.get_name()
+                        )
+                    );
+                    return Err(error);
+                }
+            };
 
             if page.len() > page_size {
                 return Err(keramics_core::error_trace_new!(format!(
@@ -102,7 +123,20 @@ impl AffBlockReader {
 
         match compression_algorithm {
             AFF_PAGE_COMPRESSION_ALGORITHM_ZLIB => {
-                let compressed_data: Vec<u8> = self.file.get_segment_data(segment.get_name())?;
+                let compressed_data: Vec<u8> = match self.file.get_segment_data(segment.get_name())
+                {
+                    Ok(compressed_data) => compressed_data,
+                    Err(mut error) => {
+                        keramics_core::error_trace_add_frame!(
+                            error,
+                            format!(
+                                "Unable to read segment data of segment: {}",
+                                segment.get_name()
+                            )
+                        );
+                        return Err(error);
+                    }
+                };
                 let mut page: Vec<u8> = vec![0; page_size];
 
                 let uncompressed_data_size: usize = crate::zlib_decompress!(
@@ -118,7 +152,20 @@ impl AffBlockReader {
                 Ok(page)
             }
             AFF_PAGE_COMPRESSION_ALGORITHM_LZMA => {
-                let compressed_data: Vec<u8> = self.file.get_segment_data(segment.get_name())?;
+                let compressed_data: Vec<u8> = match self.file.get_segment_data(segment.get_name())
+                {
+                    Ok(compressed_data) => compressed_data,
+                    Err(mut error) => {
+                        keramics_core::error_trace_add_frame!(
+                            error,
+                            format!(
+                                "Unable to read segment data of segment: {}",
+                                segment.get_name()
+                            )
+                        );
+                        return Err(error);
+                    }
+                };
                 let mut page: Vec<u8> = vec![0; page_size];
 
                 let uncompressed_data_size: usize = crate::lzma_decompress!(

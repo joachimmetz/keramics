@@ -38,14 +38,14 @@ impl AffSegment {
         }
     }
 
-    /// Retrieves the data offset.
-    pub fn get_data_offset(&self) -> u64 {
-        self.data_offset
-    }
-
     /// Retrieves the data length.
     pub fn get_data_length(&self) -> u32 {
         self.data_length
+    }
+
+    /// Retrieves the data offset.
+    pub fn get_data_offset(&self) -> u64 {
+        self.data_offset
     }
 
     /// Retrieves the flag.

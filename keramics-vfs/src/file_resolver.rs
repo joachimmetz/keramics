@@ -38,37 +38,6 @@ impl VfsFileResolver {
 }
 
 impl FileResolver for VfsFileResolver {
-    /// Retrieves the names of the files stored in the directory with the specified path.
-    fn list_file_names(
-        &self,
-        path_components: &[PathComponent],
-    ) -> Result<Vec<String>, ErrorTrace> {
-        let mut file_names: Vec<String> = Vec::new();
-
-        let path: Path = self
-            .base_path
-            .new_with_join_path_components(path_components);
-        match self.file_system.get_file_entry_by_path(&path) {
-            Ok(Some(mut file_entry)) => {
-                let number_of_sub_file_entries: usize =
-                    file_entry.get_number_of_sub_file_entries()?;
-                for sub_file_entry_index in 0..number_of_sub_file_entries {
-                    let sub_file_entry: VfsFileEntry =
-                        file_entry.get_sub_file_entry_by_index(sub_file_entry_index)?;
-                    if let Some(name) = sub_file_entry.get_name() {
-                        file_names.push(name.to_string());
-                    }
-                }
-            }
-            Ok(None) => {}
-            Err(mut error) => {
-                keramics_core::error_trace_add_frame!(error, "Unable to retrieve file entry");
-                return Err(error);
-            }
-        }
-        Ok(file_names)
-    }
-
     /// Retrieves a data stream with the specified path.
     fn get_data_stream(
         &self,
@@ -87,6 +56,58 @@ impl FileResolver for VfsFileResolver {
                 Err(error)
             }
         }
+    }
+
+    /// Retrieves the names of the files stored in the directory with the specified path.
+    fn list_file_names(
+        &self,
+        path_components: &[PathComponent],
+    ) -> Result<Vec<String>, ErrorTrace> {
+        let mut file_names: Vec<String> = Vec::new();
+
+        let path: Path = self
+            .base_path
+            .new_with_join_path_components(path_components);
+        match self.file_system.get_file_entry_by_path(&path) {
+            Ok(Some(mut file_entry)) => {
+                let number_of_sub_file_entries: usize =
+                    match file_entry.get_number_of_sub_file_entries() {
+                        Ok(number_of_sub_file_entries) => number_of_sub_file_entries,
+                        Err(mut error) => {
+                            keramics_core::error_trace_add_frame!(
+                                error,
+                                "Unable to retrieve number of sub file entries"
+                            );
+                            return Err(error);
+                        }
+                    };
+                for sub_file_entry_index in 0..number_of_sub_file_entries {
+                    let sub_file_entry: VfsFileEntry =
+                        match file_entry.get_sub_file_entry_by_index(sub_file_entry_index) {
+                            Ok(sub_file_entry) => sub_file_entry,
+                            Err(mut error) => {
+                                keramics_core::error_trace_add_frame!(
+                                    error,
+                                    format!(
+                                        "Unable to retrieve sub file entry: {}",
+                                        sub_file_entry_index
+                                    )
+                                );
+                                return Err(error);
+                            }
+                        };
+                    if let Some(name) = sub_file_entry.get_name() {
+                        file_names.push(name.to_string());
+                    }
+                }
+            }
+            Ok(None) => {}
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, "Unable to retrieve file entry");
+                return Err(error);
+            }
+        }
+        Ok(file_names)
     }
 }
 

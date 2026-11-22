@@ -28,8 +28,8 @@ if [ -f "${BASE_IMAGE_FILE}" ]
 then
     # Create an AFF4 volume with an ext2 file system.
     # Note that the output path is passed as an absolute path, because the AFF4 imager establishes
-    # an internal virtual routing map, and therefor not reliably handles relative output paths in
-    # sub directories.
+    # an internal virtual routing map, and therefore does not reliably handle relative output paths
+    # in sub directories.
     aff4imager -t --relative -i "${BASE_IMAGE_FILE}" -o "${PWD}/test_data/aff4/ext2.aff4"
 
     # Create an AFF4 volume with two images, an ext2 and an ext3 file system.

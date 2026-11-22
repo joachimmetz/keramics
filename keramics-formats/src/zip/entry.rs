@@ -195,7 +195,7 @@ mod tests {
     fn test_read_data() -> Result<(), ErrorTrace> {
         let test_data: Vec<u8> = get_test_data();
 
-        let mut test_struct = ZipEntry::new();
+        let mut test_struct: ZipEntry = ZipEntry::new();
         test_struct.read_data(&test_data[..46])?;
 
         assert_eq!(test_struct.version_made_by, 23);
@@ -217,8 +217,8 @@ mod tests {
     fn test_read_data_with_unsupported_data_size() {
         let test_data: Vec<u8> = get_test_data();
 
-        let mut test_struct = ZipEntry::new();
-        let result = test_struct.read_data(&test_data[..45]);
+        let mut test_struct: ZipEntry = ZipEntry::new();
+        let result: Result<(), ErrorTrace> = test_struct.read_data(&test_data[..45]);
         assert!(result.is_err());
     }
 
@@ -227,8 +227,8 @@ mod tests {
         let mut test_data: Vec<u8> = get_test_data();
         test_data[0] = 0xff;
 
-        let mut test_struct = ZipEntry::new();
-        let result = test_struct.read_data(&test_data[..46]);
+        let mut test_struct: ZipEntry = ZipEntry::new();
+        let result: Result<(), ErrorTrace> = test_struct.read_data(&test_data[..46]);
         assert!(result.is_err());
     }
 
@@ -237,7 +237,7 @@ mod tests {
         let test_data: Vec<u8> = get_test_data();
         let data_stream: DataStreamReference = open_fake_data_stream(&test_data);
 
-        let mut test_struct = ZipEntry::new();
+        let mut test_struct: ZipEntry = ZipEntry::new();
         test_struct.read_at_position(&data_stream, SeekFrom::Start(0))?;
 
         assert_eq!(test_struct.compressed_size, 42);

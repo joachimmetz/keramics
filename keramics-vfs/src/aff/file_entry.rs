@@ -59,19 +59,19 @@ impl AffFileEntry {
         }
     }
 
-    /// Retrieves the size.
-    pub fn get_size(&self) -> u64 {
-        match self {
-            AffFileEntry::Layer { image, .. } => image.get_media_size(),
-            AffFileEntry::Root { .. } => 0,
-        }
-    }
-
     /// Retrieves the number of sub file entries.
     pub fn get_number_of_sub_file_entries(&self) -> usize {
         match self {
             AffFileEntry::Layer { .. } => 0,
             AffFileEntry::Root { .. } => 1,
+        }
+    }
+
+    /// Retrieves the size.
+    pub fn get_size(&self) -> u64 {
+        match self {
+            AffFileEntry::Layer { image, .. } => image.get_media_size(),
+            AffFileEntry::Root { .. } => 0,
         }
     }
 
@@ -129,9 +129,6 @@ mod tests {
 
         Ok(Arc::new(image))
     }
-
-    // TODO: implement get_layer_file_entry
-    // TODO: implement get_root_file_entry
 
     fn get_layer_file_entry(aff_image: &Arc<AffImage>) -> Result<AffFileEntry, ErrorTrace> {
         Ok(AffFileEntry::Layer {

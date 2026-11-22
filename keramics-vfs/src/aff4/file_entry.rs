@@ -87,11 +87,13 @@ impl Aff4FileEntry {
         }
     }
 
-    /// Determines if the file entry is the root file entry.
-    pub fn is_root_file_entry(&self) -> bool {
+    /// Retrieves the size.
+    pub fn get_size(&self) -> u64 {
         match self {
-            Aff4FileEntry::Root { .. } => true,
-            Aff4FileEntry::Stream { .. } => false,
+            Aff4FileEntry::Root { .. } => 0,
+            Aff4FileEntry::Stream { name_index, image } => {
+                image.get_media_size_by_index(*name_index).unwrap_or(0)
+            }
         }
     }
 
@@ -119,13 +121,11 @@ impl Aff4FileEntry {
         }
     }
 
-    /// Retrieves the size.
-    pub fn get_size(&self) -> u64 {
+    /// Determines if the file entry is the root file entry.
+    pub fn is_root_file_entry(&self) -> bool {
         match self {
-            Aff4FileEntry::Root { .. } => 0,
-            Aff4FileEntry::Stream { name_index, image } => {
-                image.get_media_size_by_index(*name_index).unwrap_or(0)
-            }
+            Aff4FileEntry::Root { .. } => true,
+            Aff4FileEntry::Stream { .. } => false,
         }
     }
 }

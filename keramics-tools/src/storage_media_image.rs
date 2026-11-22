@@ -278,7 +278,8 @@ impl StorageMediaImage {
 
     /// Opens an AFF image.
     fn open_aff_image(path: &PathBuf) -> Result<StorageMediaImage, ErrorTrace> {
-        let (base_path, file_name) = match Self::get_base_path_and_file_name(path) {
+        let (base_path, file_name): (PathBuf, &str) = match Self::get_base_path_and_file_name(path)
+        {
             Ok(result) => result,
             Err(mut error) => {
                 keramics_core::error_trace_add_frame!(
@@ -311,7 +312,8 @@ impl StorageMediaImage {
 
     /// Opens an AFF4 image.
     fn open_aff4_image(path: &PathBuf) -> Result<StorageMediaImage, ErrorTrace> {
-        let (base_path, file_name) = match Self::get_base_path_and_file_name(path) {
+        let (base_path, file_name): (PathBuf, &str) = match Self::get_base_path_and_file_name(path)
+        {
             Ok(result) => result,
             Err(mut error) => {
                 keramics_core::error_trace_add_frame!(

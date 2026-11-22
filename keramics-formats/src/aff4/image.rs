@@ -158,36 +158,6 @@ impl Aff4Image {
         }
     }
 
-    /// Retrieves the name.
-    pub fn get_name(&self) -> &str {
-        &self.name
-    }
-
-    /// Retrieves the media size.
-    pub fn get_media_size(&self) -> u64 {
-        self.media_size
-    }
-
-    /// Retrieves the volume URI.
-    pub fn get_volume_uri(&self) -> &str {
-        &self.volume_uri
-    }
-
-    /// Retrieves the version major.
-    pub fn get_version_major(&self) -> u16 {
-        self.version_major
-    }
-
-    /// Retrieves the version minor.
-    pub fn get_version_minor(&self) -> u16 {
-        self.version_minor
-    }
-
-    /// Retrieves the tool that created the image.
-    pub fn get_tool(&self) -> &str {
-        &self.tool
-    }
-
     /// Retrieves the name of the first image entry stored in the volume.
     pub fn get_image_entry_name(&self) -> &str {
         self.image_entry_names
@@ -199,6 +169,11 @@ impl Aff4Image {
     /// Retrieves the name of the image entry stored in the volume with the specified index.
     pub fn get_image_entry_name_by_index(&self, index: usize) -> Option<&str> {
         self.image_entry_names.get(index).map(String::as_str)
+    }
+
+    /// Retrieves the media size.
+    pub fn get_media_size(&self) -> u64 {
+        self.media_size
     }
 
     /// Retrieves the media size of the image with the specified index.
@@ -218,9 +193,34 @@ impl Aff4Image {
             })
     }
 
+    /// Retrieves the name.
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
     /// Determines the number of images stored in the volume.
     pub fn get_number_of_images(&self) -> usize {
         self.image_entry_names.len()
+    }
+
+    /// Retrieves the tool that created the image.
+    pub fn get_tool(&self) -> &str {
+        &self.tool
+    }
+
+    /// Retrieves the version major.
+    pub fn get_version_major(&self) -> u16 {
+        self.version_major
+    }
+
+    /// Retrieves the version minor.
+    pub fn get_version_minor(&self) -> u16 {
+        self.version_minor
+    }
+
+    /// Retrieves the volume URI.
+    pub fn get_volume_uri(&self) -> &str {
+        &self.volume_uri
     }
 
     /// Opens a storage media image.
@@ -318,8 +318,8 @@ mod tests {
     use keramics_core::{DataStreamReference, open_os_data_stream};
 
     use crate::os_file_resolver::OsFileResolver;
-
     use crate::tests::get_test_data_path;
+    use crate::zip::{ZipEntry, ZipFile};
 
     fn get_image() -> Result<Aff4Image, ErrorTrace> {
         let mut image: Aff4Image = Aff4Image::new();
@@ -348,6 +348,42 @@ mod tests {
             &mut data,
             SeekFrom::Start(0)
         );
+
+        Ok(data)
+    }
+
+    fn get_standard_image(file_name: &str) -> Result<Aff4Image, ErrorTrace> {
+        let mut image: Aff4Image = Aff4Image::new();
+
+        let path_string: String = get_test_data_path("aff4");
+        let path_buf: PathBuf = PathBuf::from(path_string.as_str());
+        let file_resolver: FileResolverReference =
+            FileResolverReference::new(Box::new(OsFileResolver::new(path_buf)));
+
+        let file_name: PathComponent = PathComponent::from(file_name);
+        image.open(&file_resolver, &file_name)?;
+
+        Ok(image)
+    }
+
+    /// Reads the bevy data entry of the `split.aff4` volume, used as the
+    /// comparison data for the standard split volume test.
+    fn get_split_entry_data() -> Result<Vec<u8>, ErrorTrace> {
+        let path_string: String = get_test_data_path("aff4/split.aff4");
+        let path_buf: PathBuf = PathBuf::from(path_string.as_str());
+        let data_stream: DataStreamReference = open_os_data_stream(&path_buf)?;
+
+        let mut zip_file: ZipFile = ZipFile::new();
+        zip_file.read_data_stream(&data_stream)?;
+
+        let entry: ZipEntry = zip_file
+            .get_entry("file%3A/tmp/keramics_aff4_split.raw/00000000")
+            .cloned()
+            .ok_or_else(|| {
+                keramics_core::error_trace_new!("Missing bevy data entry in split volume")
+            })?;
+        let mut data: Vec<u8> = vec![0; entry.uncompressed_size as usize];
+        zip_file.read_entry_data(&entry, &mut data)?;
 
         Ok(data)
     }
@@ -506,44 +542,6 @@ mod tests {
         );
 
         Ok(())
-    }
-
-    fn get_standard_image(file_name: &str) -> Result<Aff4Image, ErrorTrace> {
-        let mut image: Aff4Image = Aff4Image::new();
-
-        let path_string: String = get_test_data_path("aff4");
-        let path_buf: PathBuf = PathBuf::from(path_string.as_str());
-        let file_resolver: FileResolverReference =
-            FileResolverReference::new(Box::new(OsFileResolver::new(path_buf)));
-
-        let file_name: PathComponent = PathComponent::from(file_name);
-        image.open(&file_resolver, &file_name)?;
-
-        Ok(image)
-    }
-
-    /// Reads the bevy data entry of the `split.aff4` volume, used as the
-    /// comparison data for the standard split volume test.
-    fn get_split_entry_data() -> Result<Vec<u8>, ErrorTrace> {
-        use crate::zip::ZipFile;
-
-        let path_string: String = get_test_data_path("aff4/split.aff4");
-        let path_buf: PathBuf = PathBuf::from(path_string.as_str());
-        let data_stream: DataStreamReference = open_os_data_stream(&path_buf)?;
-
-        let mut zip_file: ZipFile = ZipFile::new();
-        zip_file.read_data_stream(&data_stream)?;
-
-        let entry: crate::zip::ZipEntry = zip_file
-            .get_entry("file%3A/tmp/keramics_aff4_split.raw/00000000")
-            .cloned()
-            .ok_or_else(|| {
-                keramics_core::error_trace_new!("Missing bevy data entry in split volume")
-            })?;
-        let mut data: Vec<u8> = vec![0; entry.uncompressed_size as usize];
-        zip_file.read_entry_data(&entry, &mut data)?;
-
-        Ok(data)
     }
 
     #[test]
