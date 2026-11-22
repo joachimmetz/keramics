@@ -221,7 +221,7 @@ impl CdFsFileEntry {
         keramics_core::data_stream_read_exact_at_position!(
             &self.data_stream,
             &mut data,
-            std::io::SeekFrom::Start(data_start_offset)
+            SeekFrom::Start(data_start_offset)
         );
         keramics_core::debug_trace_data!(
             "CdFsExtendedAttributeRecord",
@@ -380,13 +380,12 @@ mod tests {
 
     use std::path::PathBuf;
 
-    use keramics_core::open_os_data_stream;
+    use keramics_core::{open_fake_data_stream, open_os_data_stream};
     use keramics_encodings::CharacterEncoding;
 
     use crate::cdfs::file_system::CdFsFileSystem;
     use crate::cdfs::volume::CdFsVolume;
     use crate::path::Path;
-
     use crate::tests::get_test_data_path;
 
     fn get_file_system(path_string: &str) -> Result<CdFsFileSystem, ErrorTrace> {
@@ -683,5 +682,103 @@ mod tests {
         assert_eq!(cdfs_file_entry.is_root_directory(), false);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_read_extended_attribute_record() -> Result<(), ErrorTrace> {
+        let mut xar_data: Vec<u8> = vec![0; 2048];
+        xar_data[0..10]
+            .copy_from_slice(&[0x0a, 0x00, 0x00, 0x0a, 0x14, 0x00, 0x00, 0x14, 0x01, 0xff]);
+        xar_data[10..27].copy_from_slice(b"20100812200631008");
+        xar_data[27..44].copy_from_slice(b"20100812200631008");
+        xar_data[44..61].copy_from_slice(b"20100812200631008");
+        xar_data[61..78].copy_from_slice(b"20100812200631008");
+        let data_stream: DataStreamReference = open_fake_data_stream(&xar_data);
+
+        let mut directory_record: CdFsDirectoryRecord = CdFsDirectoryRecord::new();
+        directory_record.data_start_sector = 0;
+        directory_record.data_size = 2048;
+        directory_record.extended_attribute_record_size = 78;
+
+        let mut file_entry: CdFsFileEntry =
+            CdFsFileEntry::new(&data_stream, 2048, 0, directory_record);
+        let extended_attribute_record: CdFsExtendedAttributeRecord =
+            file_entry.read_extended_attribute_record()?;
+        file_entry.extended_attribute_record = Some(extended_attribute_record);
+        file_entry.extended_attribute_record_read = true;
+
+        assert_eq!(file_entry.get_owner_identifier(), Some(10));
+        assert_eq!(file_entry.get_group_identifier(), Some(20));
+        assert_eq!(file_entry.get_permissions(), Some(0x01ff));
+        assert!(file_entry.get_creation_time().is_some());
+        assert!(file_entry.get_modification_time().is_some());
+        assert!(file_entry.get_expiration_time().is_some());
+        assert!(file_entry.get_effective_time().is_some());
+
+        // Test with zero data size.
+        let mut empty_record: CdFsDirectoryRecord = CdFsDirectoryRecord::new();
+        empty_record.extended_attribute_record_size = 78;
+        let mut empty_entry: CdFsFileEntry =
+            CdFsFileEntry::new(&data_stream, 2048, 0, empty_record);
+        let result: Result<CdFsExtendedAttributeRecord, ErrorTrace> =
+            empty_entry.read_extended_attribute_record();
+        assert!(result.is_err());
+
+        // Test with invalid extended attribute record data.
+        let bad_stream: DataStreamReference = open_fake_data_stream(&[0xff; 2048]);
+        let mut bad_record: CdFsDirectoryRecord = CdFsDirectoryRecord::new();
+        bad_record.data_size = 2048;
+        bad_record.extended_attribute_record_size = 78;
+        let mut bad_entry: CdFsFileEntry = CdFsFileEntry::new(&bad_stream, 2048, 0, bad_record);
+        let result: Result<CdFsExtendedAttributeRecord, ErrorTrace> =
+            bad_entry.read_extended_attribute_record();
+        assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_sub_directory_records_with_errors() {
+        let empty_stream: DataStreamReference = open_fake_data_stream(&[]);
+
+        // Test with zero data size on a directory entry.
+        let mut zero_record: CdFsDirectoryRecord = CdFsDirectoryRecord::new();
+        zero_record.file_flags = CDFS_FILE_FLAG_DIRECTORY;
+        let mut zero_entry: CdFsFileEntry = CdFsFileEntry::new(&empty_stream, 2048, 0, zero_record);
+
+        let result: Result<usize, ErrorTrace> = zero_entry.get_number_of_sub_file_entries();
+        assert!(result.is_err());
+
+        let result: Result<CdFsFileEntry, ErrorTrace> = zero_entry.get_sub_file_entry_by_index(0);
+        assert!(result.is_err());
+
+        let name: PathComponent = PathComponent::from("FILE");
+        let result: Result<Option<CdFsFileEntry>, ErrorTrace> =
+            zero_entry.get_sub_file_entry_by_name(&name);
+        assert!(result.is_err());
+
+        // Test with directory record size out of bounds.
+        let mut oob_data: Vec<u8> = vec![0; 34];
+        oob_data[0] = 0xff;
+        let oob_stream: DataStreamReference = open_fake_data_stream(&oob_data);
+        let mut oob_record: CdFsDirectoryRecord = CdFsDirectoryRecord::new();
+        oob_record.file_flags = CDFS_FILE_FLAG_DIRECTORY;
+        oob_record.data_size = 34;
+        let mut oob_entry: CdFsFileEntry = CdFsFileEntry::new(&oob_stream, 2048, 0, oob_record);
+        let result: Result<(), ErrorTrace> = oob_entry.read_sub_directory_records();
+        assert!(result.is_err());
+
+        // Test with invalid directory record inside directory data.
+        let mut bad_dir_data: Vec<u8> = vec![0; 34];
+        bad_dir_data[0] = 34;
+        bad_dir_data[2] = 0xff;
+        let bad_dir_stream: DataStreamReference = open_fake_data_stream(&bad_dir_data);
+        let mut bad_dir_record: CdFsDirectoryRecord = CdFsDirectoryRecord::new();
+        bad_dir_record.file_flags = CDFS_FILE_FLAG_DIRECTORY;
+        bad_dir_record.data_size = 34;
+        let mut bad_dir_entry: CdFsFileEntry =
+            CdFsFileEntry::new(&bad_dir_stream, 2048, 0, bad_dir_record);
+        let result: Result<(), ErrorTrace> = bad_dir_entry.read_sub_directory_records();
+        assert!(result.is_err());
     }
 }

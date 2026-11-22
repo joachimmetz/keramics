@@ -143,7 +143,7 @@ mod tests {
 
     #[test]
     fn test_read_data() -> Result<(), ErrorTrace> {
-        let mut test_struct = CdFsDirectoryRecord::new();
+        let mut test_struct: CdFsDirectoryRecord = CdFsDirectoryRecord::new();
 
         let test_data: Vec<u8> = get_test_data();
         test_struct.read_data(&test_data)?;
@@ -166,43 +166,54 @@ mod tests {
 
     #[test]
     fn test_read_data_with_unsupported_data_size() {
-        let mut test_struct = CdFsDirectoryRecord::new();
+        let mut test_struct: CdFsDirectoryRecord = CdFsDirectoryRecord::new();
 
         let test_data: Vec<u8> = get_test_data();
-        let result = test_struct.read_data(&test_data[0..32]);
+        let result: Result<(), ErrorTrace> = test_struct.read_data(&test_data[0..32]);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_read_data_with_data_start_sector_mismatch() {
-        let mut test_struct = CdFsDirectoryRecord::new();
+        let mut test_struct: CdFsDirectoryRecord = CdFsDirectoryRecord::new();
 
         let mut test_data: Vec<u8> = get_test_data();
         test_data[2] = 0xff;
 
-        let result = test_struct.read_data(&test_data);
+        let result: Result<(), ErrorTrace> = test_struct.read_data(&test_data);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_read_data_with_data_size_mismatch() {
-        let mut test_struct = CdFsDirectoryRecord::new();
+        let mut test_struct: CdFsDirectoryRecord = CdFsDirectoryRecord::new();
 
         let mut test_data: Vec<u8> = get_test_data();
         test_data[10] = 0xff;
 
-        let result = test_struct.read_data(&test_data);
+        let result: Result<(), ErrorTrace> = test_struct.read_data(&test_data);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_read_data_with_volume_set_index_mismatch() {
-        let mut test_struct = CdFsDirectoryRecord::new();
+        let mut test_struct: CdFsDirectoryRecord = CdFsDirectoryRecord::new();
 
         let mut test_data: Vec<u8> = get_test_data();
         test_data[28] = 0xff;
 
-        let result = test_struct.read_data(&test_data);
+        let result: Result<(), ErrorTrace> = test_struct.read_data(&test_data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_with_name_size_out_of_bounds() {
+        let mut test_struct: CdFsDirectoryRecord = CdFsDirectoryRecord::new();
+
+        let mut test_data: Vec<u8> = get_test_data();
+        test_data[32] = 0xff;
+
+        let result: Result<(), ErrorTrace> = test_struct.read_data(&test_data);
         assert!(result.is_err());
     }
 }

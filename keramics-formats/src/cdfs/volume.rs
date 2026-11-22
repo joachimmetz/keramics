@@ -23,8 +23,8 @@ use super::file_system::CdFsFileSystem;
 use super::path_table::CdFsPathTable;
 use super::volume_descriptor::CdFsVolumeDescriptor;
 
-#[derive(Clone)]
 /// CD file system (CDFS) volume.
+#[derive(Clone)]
 pub struct CdFsVolume {
     /// Data stream.
     data_stream: Option<DataStreamReference>,
@@ -78,49 +78,29 @@ impl CdFsVolume {
         }
     }
 
-    /// Retrieves the number of volumes in set.
-    pub fn get_volumes_in_set(&self) -> u16 {
-        self.volumes_in_set
-    }
-
-    /// Retrieves the index of the volume in the set.
-    pub fn get_volume_set_index(&self) -> u16 {
-        self.volume_set_index
-    }
-
-    /// Retrieves the volume set identifier.
-    pub fn get_volume_set_identifier(&self) -> Option<&ByteString> {
-        self.volume_set_identifier.as_ref()
-    }
-
-    /// Retrieves the format version.
-    pub fn get_format_version(&self) -> u8 {
-        self.format_version
-    }
-
-    /// Retrieves the system identifier.
-    pub fn get_system_identifier(&self) -> Option<&ByteString> {
-        self.system_identifier.as_ref()
-    }
-
-    /// Retrieves the volume identifier.
-    pub fn get_volume_identifier(&self) -> Option<&ByteString> {
-        self.volume_identifier.as_ref()
-    }
-
     /// Retrieves the bytes per sector.
     pub fn get_bytes_per_sector(&self) -> u16 {
         self.bytes_per_sector
     }
 
-    /// Retrieves the volume size in bytes.
-    pub fn get_volume_size(&self) -> u64 {
-        self.volume_size
-    }
-
     /// Retrieves the data stream.
     pub(super) fn get_data_stream(&self) -> Option<&DataStreamReference> {
         self.data_stream.as_ref()
+    }
+
+    /// Retrieves the file system.
+    pub fn get_file_system(&self) -> Result<CdFsFileSystem, ErrorTrace> {
+        if self.data_stream.is_none() {
+            return Err(keramics_core::error_trace_new!("Missing data stream"));
+        }
+        let volumes: [Arc<CdFsVolume>; 1] = [Arc::new(self.clone())];
+
+        Ok(CdFsFileSystem::new(&volumes))
+    }
+
+    /// Retrieves the format version.
+    pub fn get_format_version(&self) -> u8 {
+        self.format_version
     }
 
     /// Retrieves the root directory.
@@ -133,14 +113,34 @@ impl CdFsVolume {
         self.root_directory_record_offset
     }
 
-    /// Retrieves the file system.
-    pub fn get_file_system(&self) -> Result<CdFsFileSystem, ErrorTrace> {
-        if self.data_stream.is_none() {
-            return Err(keramics_core::error_trace_new!("Missing data stream"));
-        }
-        let volumes: [Arc<CdFsVolume>; 1] = [Arc::new(self.clone())];
+    /// Retrieves the system identifier.
+    pub fn get_system_identifier(&self) -> Option<&ByteString> {
+        self.system_identifier.as_ref()
+    }
 
-        Ok(CdFsFileSystem::new(&volumes))
+    /// Retrieves the volume identifier.
+    pub fn get_volume_identifier(&self) -> Option<&ByteString> {
+        self.volume_identifier.as_ref()
+    }
+
+    /// Retrieves the volume set identifier.
+    pub fn get_volume_set_identifier(&self) -> Option<&ByteString> {
+        self.volume_set_identifier.as_ref()
+    }
+
+    /// Retrieves the index of the volume in the set.
+    pub fn get_volume_set_index(&self) -> u16 {
+        self.volume_set_index
+    }
+
+    /// Retrieves the volume size in bytes.
+    pub fn get_volume_size(&self) -> u64 {
+        self.volume_size
+    }
+
+    /// Retrieves the number of volumes in set.
+    pub fn get_volumes_in_set(&self) -> u16 {
+        self.volumes_in_set
     }
 
     /// Reads the volume from a data stream.
@@ -313,10 +313,72 @@ mod tests {
 
     use std::path::PathBuf;
 
-    use keramics_core::open_os_data_stream;
+    use keramics_core::{open_fake_data_stream, open_os_data_stream};
     use keramics_encodings::CharacterEncoding;
 
     use crate::tests::get_test_data_path;
+
+    fn build_test_volume_data(
+        volumes_in_set: u16,
+        volume_set_index: u16,
+        volume_set_identifier: &[u8],
+    ) -> Vec<u8> {
+        let mut data: Vec<u8> = vec![0; 21 * 2048];
+        let pvd_offset: usize = 16 * 2048;
+
+        // Primary volume descriptor at sector 16.
+        data[pvd_offset] = 1;
+        data[pvd_offset + 1..pvd_offset + 6].copy_from_slice(CDFS_VOLUME_DESCRIPTOR_SIGNATURE);
+        data[pvd_offset + 6] = 1;
+        data[pvd_offset + 8..pvd_offset + 13].copy_from_slice(b"LINUX");
+        data[pvd_offset + 40..pvd_offset + 45].copy_from_slice(b"CDROM");
+        data[pvd_offset + 80..pvd_offset + 84].copy_from_slice(&21u32.to_le_bytes());
+        data[pvd_offset + 84..pvd_offset + 88].copy_from_slice(&21u32.to_be_bytes());
+        data[pvd_offset + 120..pvd_offset + 122].copy_from_slice(&volumes_in_set.to_le_bytes());
+        data[pvd_offset + 122..pvd_offset + 124].copy_from_slice(&volumes_in_set.to_be_bytes());
+        data[pvd_offset + 124..pvd_offset + 126].copy_from_slice(&volume_set_index.to_le_bytes());
+        data[pvd_offset + 126..pvd_offset + 128].copy_from_slice(&volume_set_index.to_be_bytes());
+        data[pvd_offset + 128..pvd_offset + 130].copy_from_slice(&2048u16.to_le_bytes());
+        data[pvd_offset + 130..pvd_offset + 132].copy_from_slice(&2048u16.to_be_bytes());
+        data[pvd_offset + 132..pvd_offset + 136].copy_from_slice(&10u32.to_le_bytes());
+        data[pvd_offset + 136..pvd_offset + 140].copy_from_slice(&10u32.to_be_bytes());
+        data[pvd_offset + 140..pvd_offset + 144].copy_from_slice(&18u32.to_le_bytes());
+        data[pvd_offset + 148..pvd_offset + 152].copy_from_slice(&19u32.to_be_bytes());
+
+        // Root directory record at PVD offset 156 (34 bytes).
+        let root_offset: usize = pvd_offset + 156;
+        data[root_offset] = 34;
+        data[root_offset + 2..root_offset + 6].copy_from_slice(&20u32.to_le_bytes());
+        data[root_offset + 6..root_offset + 10].copy_from_slice(&20u32.to_be_bytes());
+        data[root_offset + 10..root_offset + 14].copy_from_slice(&2048u32.to_le_bytes());
+        data[root_offset + 14..root_offset + 18].copy_from_slice(&2048u32.to_be_bytes());
+        data[root_offset + 25] = CDFS_FILE_FLAG_DIRECTORY;
+        data[root_offset + 28..root_offset + 30].copy_from_slice(&volume_set_index.to_le_bytes());
+        data[root_offset + 30..root_offset + 32].copy_from_slice(&volume_set_index.to_be_bytes());
+        data[root_offset + 32] = 1;
+
+        if !volume_set_identifier.is_empty() {
+            data[pvd_offset + 190..pvd_offset + 190 + volume_set_identifier.len()]
+                .copy_from_slice(volume_set_identifier);
+        }
+
+        // Volume descriptor set terminator at sector 17.
+        let term_offset: usize = 17 * 2048;
+        data[term_offset..term_offset + 6].copy_from_slice(CDFS_VOLUME_DESCRIPTOR_SET_TERMINATOR);
+        data[term_offset + 6] = 1;
+
+        // Little-endian path table at sector 18 (10 bytes).
+        let le_pt_offset: usize = 18 * 2048;
+        data[le_pt_offset..le_pt_offset + 10]
+            .copy_from_slice(&[0x01, 0x00, 0x14, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00]);
+
+        // Big-endian path table at sector 19 (10 bytes).
+        let be_pt_offset: usize = 19 * 2048;
+        data[be_pt_offset..be_pt_offset + 10]
+            .copy_from_slice(&[0x01, 0x00, 0x00, 0x00, 0x00, 0x14, 0x00, 0x01, 0x00, 0x00]);
+
+        data
+    }
 
     fn get_volume() -> Result<CdFsVolume, ErrorTrace> {
         let mut volume: CdFsVolume = CdFsVolume::new();
@@ -416,6 +478,89 @@ mod tests {
         let data_stream: DataStreamReference = open_os_data_stream(&path_buf)?;
         volume.read_data_stream(&data_stream)?;
 
+        assert_eq!(volume.get_bytes_per_sector(), 2048);
+
         Ok(())
+    }
+
+    #[test]
+    fn test_get_file_system() -> Result<(), ErrorTrace> {
+        let unread_volume: CdFsVolume = CdFsVolume::new();
+        let result: Result<CdFsFileSystem, ErrorTrace> = unread_volume.get_file_system();
+        assert!(result.is_err());
+
+        let volume: CdFsVolume = get_volume()?;
+        _ = volume.get_file_system()?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read_data_stream_with_errors() {
+        let pvd_offset: usize = 16 * 2048;
+
+        // Test with invalid volume descriptor signature.
+        let mut data: Vec<u8> = build_test_volume_data(1, 1, b"VOLSET");
+        data[pvd_offset + 1] = 0xff;
+        let data_stream: DataStreamReference = open_fake_data_stream(&data);
+        let mut volume: CdFsVolume = CdFsVolume::new();
+        let result: Result<(), ErrorTrace> = volume.read_data_stream(&data_stream);
+        assert!(result.is_err());
+
+        // Test with missing primary volume descriptor (immediate terminator).
+        let mut data: Vec<u8> = build_test_volume_data(1, 1, b"");
+        data[pvd_offset..pvd_offset + 6].copy_from_slice(CDFS_VOLUME_DESCRIPTOR_SET_TERMINATOR);
+        let data_stream: DataStreamReference = open_fake_data_stream(&data);
+        let mut volume: CdFsVolume = CdFsVolume::new();
+        let result: Result<(), ErrorTrace> = volume.read_data_stream(&data_stream);
+        assert!(result.is_err());
+
+        // Test with invalid root directory record.
+        let mut data: Vec<u8> = build_test_volume_data(1, 1, b"");
+        data[pvd_offset + 156 + 2] = 0xff;
+        let data_stream: DataStreamReference = open_fake_data_stream(&data);
+        let mut volume: CdFsVolume = CdFsVolume::new();
+        let result: Result<(), ErrorTrace> = volume.read_data_stream(&data_stream);
+        assert!(result.is_err());
+
+        // Test with zero path table size.
+        let mut data: Vec<u8> = build_test_volume_data(1, 1, b"");
+        data[pvd_offset + 132..pvd_offset + 140].fill(0);
+        let data_stream: DataStreamReference = open_fake_data_stream(&data);
+        let mut volume: CdFsVolume = CdFsVolume::new();
+        let result: Result<(), ErrorTrace> = volume.read_data_stream(&data_stream);
+        assert!(result.is_err());
+
+        // Test with missing big-endian path table start sector.
+        let mut data: Vec<u8> = build_test_volume_data(1, 1, b"");
+        data[pvd_offset + 148..pvd_offset + 152].fill(0);
+        let data_stream: DataStreamReference = open_fake_data_stream(&data);
+        let mut volume: CdFsVolume = CdFsVolume::new();
+        let result: Result<(), ErrorTrace> = volume.read_data_stream(&data_stream);
+        assert!(result.is_err());
+
+        // Test with invalid big-endian path table record.
+        let mut data: Vec<u8> = build_test_volume_data(1, 1, b"");
+        data[19 * 2048] = 0x80;
+        let data_stream: DataStreamReference = open_fake_data_stream(&data);
+        let mut volume: CdFsVolume = CdFsVolume::new();
+        let result: Result<(), ErrorTrace> = volume.read_data_stream(&data_stream);
+        assert!(result.is_err());
+
+        // Test with missing little-endian path table start sector.
+        let mut data: Vec<u8> = build_test_volume_data(1, 1, b"");
+        data[pvd_offset + 140..pvd_offset + 144].fill(0);
+        let data_stream: DataStreamReference = open_fake_data_stream(&data);
+        let mut volume: CdFsVolume = CdFsVolume::new();
+        let result: Result<(), ErrorTrace> = volume.read_data_stream(&data_stream);
+        assert!(result.is_err());
+
+        // Test with invalid little-endian path table record.
+        let mut data: Vec<u8> = build_test_volume_data(1, 1, b"");
+        data[18 * 2048] = 0x80;
+        let data_stream: DataStreamReference = open_fake_data_stream(&data);
+        let mut volume: CdFsVolume = CdFsVolume::new();
+        let result: Result<(), ErrorTrace> = volume.read_data_stream(&data_stream);
+        assert!(result.is_err());
     }
 }

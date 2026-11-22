@@ -36,67 +36,6 @@ impl CdFsFileSystem {
         }
     }
 
-    /// Retrieves the root directory.
-    pub fn get_root_directory(&self) -> Result<&CdFsDirectoryRecord, ErrorTrace> {
-        match self.volumes.first() {
-            Some(volume) => Ok(volume.get_root_directory()),
-            None => Err(keramics_core::error_trace_new!("Missing volumes")),
-        }
-    }
-
-    /// Retrieves the file entry for a specific path.
-    pub fn get_file_entry_by_path(&self, path: &Path) -> Result<Option<CdFsFileEntry>, ErrorTrace> {
-        if path.is_empty() || path.is_relative() {
-            return Ok(None);
-        }
-        let mut file_entry: CdFsFileEntry = match self.get_root_file_entry() {
-            Ok(file_entry) => file_entry,
-            Err(mut error) => {
-                keramics_core::error_trace_add_frame!(error, "Unable to retrieve root file entry");
-                return Err(error);
-            }
-        };
-        for path_component in path.components[1..].iter() {
-            file_entry = match file_entry.get_sub_file_entry_by_name(path_component) {
-                Ok(Some(file_entry)) => file_entry,
-                Ok(None) => return Ok(None),
-                Err(mut error) => {
-                    keramics_core::error_trace_add_frame!(
-                        error,
-                        format!("Unable to retrieve sub file entry: {}", path_component)
-                    );
-                    return Err(error);
-                }
-            };
-        }
-        Ok(Some(file_entry))
-    }
-
-    /// Retrieves the root file entry.
-    pub fn get_root_file_entry(&self) -> Result<CdFsFileEntry, ErrorTrace> {
-        match self.volumes.first() {
-            Some(volume) => {
-                let data_stream: &DataStreamReference = match volume.get_data_stream() {
-                    Some(data_stream) => data_stream,
-                    None => {
-                        return Err(keramics_core::error_trace_new!("Missing data stream"));
-                    }
-                };
-                let bytes_per_sector: u16 = volume.get_bytes_per_sector();
-                let directory_record: CdFsDirectoryRecord = volume.get_root_directory().clone();
-                let directory_record_offset: u64 = volume.get_root_directory_record_offset();
-
-                Ok(CdFsFileEntry::new(
-                    data_stream,
-                    bytes_per_sector,
-                    directory_record_offset,
-                    directory_record,
-                ))
-            }
-            None => Err(keramics_core::error_trace_new!("Missing volumes")),
-        }
-    }
-
     /// Retrieves the file entry for a specific identifier, i.e. the offset of the directory
     /// record.
     pub fn get_file_entry_by_identifier(
@@ -182,6 +121,67 @@ impl CdFsFileSystem {
         }
         Ok(None)
     }
+
+    /// Retrieves the file entry for a specific path.
+    pub fn get_file_entry_by_path(&self, path: &Path) -> Result<Option<CdFsFileEntry>, ErrorTrace> {
+        if path.is_empty() || path.is_relative() {
+            return Ok(None);
+        }
+        let mut file_entry: CdFsFileEntry = match self.get_root_file_entry() {
+            Ok(file_entry) => file_entry,
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, "Unable to retrieve root file entry");
+                return Err(error);
+            }
+        };
+        for path_component in path.components[1..].iter() {
+            file_entry = match file_entry.get_sub_file_entry_by_name(path_component) {
+                Ok(Some(file_entry)) => file_entry,
+                Ok(None) => return Ok(None),
+                Err(mut error) => {
+                    keramics_core::error_trace_add_frame!(
+                        error,
+                        format!("Unable to retrieve sub file entry: {}", path_component)
+                    );
+                    return Err(error);
+                }
+            };
+        }
+        Ok(Some(file_entry))
+    }
+
+    /// Retrieves the root directory.
+    pub fn get_root_directory(&self) -> Result<&CdFsDirectoryRecord, ErrorTrace> {
+        match self.volumes.first() {
+            Some(volume) => Ok(volume.get_root_directory()),
+            None => Err(keramics_core::error_trace_new!("Missing volumes")),
+        }
+    }
+
+    /// Retrieves the root file entry.
+    pub fn get_root_file_entry(&self) -> Result<CdFsFileEntry, ErrorTrace> {
+        match self.volumes.first() {
+            Some(volume) => {
+                let data_stream: &DataStreamReference = match volume.get_data_stream() {
+                    Some(data_stream) => data_stream,
+                    None => {
+                        return Err(keramics_core::error_trace_new!("Missing data stream"));
+                    }
+                };
+                let bytes_per_sector: u16 = volume.get_bytes_per_sector();
+                let directory_record: CdFsDirectoryRecord = volume.get_root_directory().clone();
+                let directory_record_offset: u64 = volume.get_root_directory_record_offset();
+
+                Ok(CdFsFileEntry::new(
+                    data_stream,
+                    bytes_per_sector,
+                    directory_record_offset,
+                    directory_record,
+                ))
+            }
+            None => Err(keramics_core::error_trace_new!("Missing volumes")),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -194,9 +194,8 @@ mod tests {
     use keramics_types::ByteString;
 
     use crate::path::Path;
-    use crate::traits::FileEntryIterator;
-
     use crate::tests::get_test_data_path;
+    use crate::traits::FileEntryIterator;
 
     fn get_file_system() -> Result<CdFsFileSystem, ErrorTrace> {
         let mut volume: CdFsVolume = CdFsVolume::new();
@@ -283,6 +282,54 @@ mod tests {
         let result: Result<CdFsFileEntry, ErrorTrace> = file_system.get_file_entry_by_identifier(1);
         assert!(result.is_err());
 
+        let nested_path: Path = Path::from("/testdir1/testfile1");
+        let nested_entry: CdFsFileEntry =
+            file_system.get_file_entry_by_path(&nested_path)?.unwrap();
+        let file_entry: CdFsFileEntry =
+            file_system.get_file_entry_by_identifier(nested_entry.get_identifier())?;
+        assert_eq!(file_entry.get_name(), nested_entry.get_name());
+
         Ok(())
+    }
+
+    #[test]
+    fn test_get_file_entry_by_path_with_empty_and_relative_paths() -> Result<(), ErrorTrace> {
+        let file_system: CdFsFileSystem = get_file_system()?;
+
+        let path: Path = Path::from("");
+        let result: Option<CdFsFileEntry> = file_system.get_file_entry_by_path(&path)?;
+        assert!(result.is_none());
+
+        let path: Path = Path::from("emptyfile");
+        let result: Option<CdFsFileEntry> = file_system.get_file_entry_by_path(&path)?;
+        assert!(result.is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_with_empty_and_unread_volumes() {
+        let empty_file_system: CdFsFileSystem = CdFsFileSystem::new(&[]);
+
+        let result: Result<&CdFsDirectoryRecord, ErrorTrace> =
+            empty_file_system.get_root_directory();
+        assert!(result.is_err());
+
+        let result: Result<CdFsFileEntry, ErrorTrace> = empty_file_system.get_root_file_entry();
+        assert!(result.is_err());
+
+        let path: Path = Path::from("/");
+        let result: Result<Option<CdFsFileEntry>, ErrorTrace> =
+            empty_file_system.get_file_entry_by_path(&path);
+        assert!(result.is_err());
+
+        let result: Result<CdFsFileEntry, ErrorTrace> =
+            empty_file_system.get_file_entry_by_identifier(0);
+        assert!(result.is_err());
+
+        let unread_volume: Arc<CdFsVolume> = Arc::new(CdFsVolume::new());
+        let unread_file_system: CdFsFileSystem = CdFsFileSystem::new(&[unread_volume]);
+        let result: Result<CdFsFileEntry, ErrorTrace> = unread_file_system.get_root_file_entry();
+        assert!(result.is_err());
     }
 }

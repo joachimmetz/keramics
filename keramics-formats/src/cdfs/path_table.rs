@@ -48,6 +48,39 @@ impl CdFsPathTable {
         self.entries.get(entry_index)
     }
 
+    /// Reads the path table from a specific position in a data stream.
+    pub fn read_at_position(
+        &mut self,
+        data_stream: &DataStreamReference,
+        position: SeekFrom,
+        data_size: usize,
+    ) -> Result<(), ErrorTrace> {
+        if data_size == 0 {
+            return Err(keramics_core::error_trace_new!("Unsupported data size"));
+        }
+        let mut data: Vec<u8> = vec![0; data_size];
+
+        let offset: u64 =
+            keramics_core::data_stream_read_exact_at_position!(data_stream, &mut data, position);
+
+        keramics_core::debug_trace_data!("CdFsPathTable", offset, &data, data_size);
+
+        match self.read_data(&data) {
+            Ok(_) => {}
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(
+                    error,
+                    format!(
+                        "Unable to read path table at offset: {} (0x{:08x})",
+                        offset, offset
+                    )
+                );
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
     /// Reads the path table from a buffer.
     fn read_data(&mut self, data: &[u8]) -> Result<(), ErrorTrace> {
         let data_size: usize = data.len();
@@ -103,39 +136,6 @@ impl CdFsPathTable {
         }
         Ok(())
     }
-
-    /// Reads the path table from a specific position in a data stream.
-    pub fn read_at_position(
-        &mut self,
-        data_stream: &DataStreamReference,
-        position: SeekFrom,
-        data_size: usize,
-    ) -> Result<(), ErrorTrace> {
-        if data_size == 0 {
-            return Err(keramics_core::error_trace_new!("Unsupported data size"));
-        }
-        let mut data: Vec<u8> = vec![0; data_size];
-
-        let offset: u64 =
-            keramics_core::data_stream_read_exact_at_position!(data_stream, &mut data, position);
-
-        keramics_core::debug_trace_data!("CdFsPathTable", offset, &data, data_size);
-
-        match self.read_data(&data) {
-            Ok(_) => {}
-            Err(mut error) => {
-                keramics_core::error_trace_add_frame!(
-                    error,
-                    format!(
-                        "Unable to read path table at offset: {} (0x{:08x})",
-                        offset, offset
-                    )
-                );
-                return Err(error);
-            }
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -168,10 +168,11 @@ mod tests {
     fn test_read_data_big_endian() -> Result<(), ErrorTrace> {
         let test_data: Vec<u8> = get_test_data_big_endian();
 
-        let mut test_struct = CdFsPathTable::new(ByteOrder::BigEndian);
+        let mut test_struct: CdFsPathTable = CdFsPathTable::new(ByteOrder::BigEndian);
         test_struct.read_data(&test_data)?;
 
         assert_eq!(test_struct.get_entries().len(), 4);
+        assert!(test_struct.get_entry(4).is_none());
 
         let entry: &CdFsPathTableRecord = test_struct.get_entry(0).unwrap();
         assert_eq!(entry.directory_start_sector, 23);
@@ -199,7 +200,7 @@ mod tests {
     fn test_read_data_little_endian() -> Result<(), ErrorTrace> {
         let test_data: Vec<u8> = get_test_data_little_endian();
 
-        let mut test_struct = CdFsPathTable::new(ByteOrder::LittleEndian);
+        let mut test_struct: CdFsPathTable = CdFsPathTable::new(ByteOrder::LittleEndian);
         test_struct.read_data(&test_data)?;
 
         assert_eq!(test_struct.get_entries().len(), 4);
@@ -230,8 +231,8 @@ mod tests {
     fn test_read_data_with_unsupported_data_size() {
         let test_data: Vec<u8> = get_test_data_little_endian();
 
-        let mut test_struct = CdFsPathTable::new(ByteOrder::LittleEndian);
-        let result = test_struct.read_data(&test_data[0..7]);
+        let mut test_struct: CdFsPathTable = CdFsPathTable::new(ByteOrder::LittleEndian);
+        let result: Result<(), ErrorTrace> = test_struct.read_data(&test_data[0..7]);
         assert!(result.is_err());
     }
 
@@ -240,8 +241,8 @@ mod tests {
         let mut test_data: Vec<u8> = get_test_data_little_endian();
         test_data[0] = 0x80;
 
-        let mut test_struct = CdFsPathTable::new(ByteOrder::LittleEndian);
-        let result = test_struct.read_data(&test_data);
+        let mut test_struct: CdFsPathTable = CdFsPathTable::new(ByteOrder::LittleEndian);
+        let result: Result<(), ErrorTrace> = test_struct.read_data(&test_data);
         assert!(result.is_err());
     }
 
@@ -250,7 +251,7 @@ mod tests {
         let test_data: Vec<u8> = get_test_data_big_endian();
         let data_stream: DataStreamReference = open_fake_data_stream(&test_data);
 
-        let mut test_struct = CdFsPathTable::new(ByteOrder::BigEndian);
+        let mut test_struct: CdFsPathTable = CdFsPathTable::new(ByteOrder::BigEndian);
         test_struct.read_at_position(&data_stream, SeekFrom::Start(0), test_data.len())?;
 
         assert_eq!(test_struct.get_entries().len(), 4);
@@ -263,7 +264,7 @@ mod tests {
         let test_data: Vec<u8> = get_test_data_little_endian();
         let data_stream: DataStreamReference = open_fake_data_stream(&test_data);
 
-        let mut test_struct = CdFsPathTable::new(ByteOrder::LittleEndian);
+        let mut test_struct: CdFsPathTable = CdFsPathTable::new(ByteOrder::LittleEndian);
         test_struct.read_at_position(&data_stream, SeekFrom::Start(0), test_data.len())?;
 
         assert_eq!(test_struct.get_entries().len(), 4);
@@ -276,8 +277,20 @@ mod tests {
         let test_data: Vec<u8> = get_test_data_little_endian();
         let data_stream: DataStreamReference = open_fake_data_stream(&test_data);
 
-        let mut test_struct = CdFsPathTable::new(ByteOrder::LittleEndian);
-        let result = test_struct.read_at_position(&data_stream, SeekFrom::Start(0), 0);
+        let mut test_struct: CdFsPathTable = CdFsPathTable::new(ByteOrder::LittleEndian);
+        let result: Result<(), ErrorTrace> =
+            test_struct.read_at_position(&data_stream, SeekFrom::Start(0), 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_at_position_with_invalid_record() {
+        let test_data: Vec<u8> = vec![0x80, 0x00, 0x17, 0x00, 0x00, 0x00, 0x01, 0x00];
+        let data_stream: DataStreamReference = open_fake_data_stream(&test_data);
+
+        let mut test_struct: CdFsPathTable = CdFsPathTable::new(ByteOrder::LittleEndian);
+        let result: Result<(), ErrorTrace> =
+            test_struct.read_at_position(&data_stream, SeekFrom::Start(0), test_data.len());
         assert!(result.is_err());
     }
 }

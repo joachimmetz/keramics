@@ -263,9 +263,7 @@ mod tests {
 
     #[test]
     fn test_cdfs_date_time_from_string() -> Result<(), ErrorTrace> {
-        let test_string: String = String::from("20100812200631008");
-
-        let test_struct: CdFsDateTime = CdFsDateTime::from_string(test_string.as_bytes())?;
+        let test_struct: CdFsDateTime = CdFsDateTime::from_string(b"20100812200631008")?;
         assert_eq!(test_struct.year, 2010);
         assert_eq!(test_struct.month, 8);
         assert_eq!(test_struct.day_of_month, 12);
@@ -279,25 +277,35 @@ mod tests {
     }
 
     #[test]
-    fn test_cdfs_date_time_from_string_with_unsupported_string_size() {
-        let test_string: [u8; 16] = [
-            0x32, 0x30, 0x31, 0x30, 0x30, 0x38, 0x31, 0x32, 0x32, 0x30, 0x30, 0x36, 0x33, 0x31,
-            0x30, 0x30,
-        ];
+    fn test_cdfs_date_time_from_string_with_invalid_utf8() {
+        let test_string: [u8; 17] = [0xff; 17];
 
         let result: Result<CdFsDateTime, ErrorTrace> = CdFsDateTime::from_string(&test_string);
         assert!(result.is_err());
     }
 
     #[test]
-    fn test_cdfs_date_time_from_string_with_invalid_digit() {
-        let test_string: [u8; 17] = [
-            0x32, 0x30, 0x31, 0x30, 0x30, 0x38, 0x31, 0x61, 0x32, 0x30, 0x30, 0x36, 0x33, 0x31,
-            0x30, 0x30, 0x38,
-        ];
-
-        let result: Result<CdFsDateTime, ErrorTrace> = CdFsDateTime::from_string(&test_string);
+    fn test_cdfs_date_time_from_string_with_unsupported_string_size() {
+        let result: Result<CdFsDateTime, ErrorTrace> =
+            CdFsDateTime::from_string(b"2010081220063100");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cdfs_date_time_from_string_with_invalid_digit() {
+        for test_string in [
+            b"201a0812200631008",
+            b"20100a12200631008",
+            b"2010081a200631008",
+            b"201008122a0631008",
+            b"20100812200a31008",
+            b"2010081220063a008",
+            b"201008122006310a8",
+            b"2010081220063100a",
+        ] {
+            let result: Result<CdFsDateTime, ErrorTrace> = CdFsDateTime::from_string(test_string);
+            assert!(result.is_err());
+        }
     }
 
     #[test]
@@ -330,9 +338,7 @@ mod tests {
 
     #[test]
     fn test_cdfs_date_time_to_iso8601_string_with_fraction() -> Result<(), ErrorTrace> {
-        let test_string: String = String::from("20100812200631258");
-
-        let test_struct: CdFsDateTime = CdFsDateTime::from_string(test_string.as_bytes())?;
+        let test_struct: CdFsDateTime = CdFsDateTime::from_string(b"20100812200631258")?;
         let string: String = test_struct.to_iso8601_string();
         assert_eq!(string.as_str(), "2010-08-12T20:06:31.25+02:00");
 

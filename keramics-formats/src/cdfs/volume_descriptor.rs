@@ -125,33 +125,6 @@ impl CdFsVolumeDescriptor {
         }
     }
 
-    /// Reads a trimmed string from a buffer.
-    pub(super) fn read_trimmed_string(
-        data: &[u8],
-        offset: usize,
-        length: usize,
-    ) -> Option<ByteString> {
-        if offset + length > data.len() {
-            return None;
-        }
-        let slice: &[u8] = &data[offset..offset + length];
-        let mut trailing: usize = 0;
-        for value in slice.iter().rev() {
-            if *value == 0 || *value == b' ' {
-                trailing += 1;
-            } else {
-                break;
-            }
-        }
-        let trimmed: &[u8] = &slice[..slice.len() - trailing];
-        if trimmed.is_empty() {
-            return None;
-        }
-        let mut byte_string: ByteString = ByteString::new_with_encoding(&CharacterEncoding::Ascii);
-        byte_string.elements.extend_from_slice(trimmed);
-        Some(byte_string)
-    }
-
     /// Reads the volume descriptor from a buffer.
     pub fn read_data(&mut self, data: &[u8]) -> Result<(), ErrorTrace> {
         if data.len() < 2048 {
@@ -206,6 +179,33 @@ impl CdFsVolumeDescriptor {
         self.path_table_start_sector_be = bytes_to_u32_be!(data, 148);
 
         Ok(())
+    }
+
+    /// Reads a trimmed string from a buffer.
+    pub(super) fn read_trimmed_string(
+        data: &[u8],
+        offset: usize,
+        length: usize,
+    ) -> Option<ByteString> {
+        if offset + length > data.len() {
+            return None;
+        }
+        let slice: &[u8] = &data[offset..offset + length];
+        let mut trailing: usize = 0;
+        for value in slice.iter().rev() {
+            if *value == 0 || *value == b' ' {
+                trailing += 1;
+            } else {
+                break;
+            }
+        }
+        let trimmed: &[u8] = &slice[..slice.len() - trailing];
+        if trimmed.is_empty() {
+            return None;
+        }
+        let mut byte_string: ByteString = ByteString::new_with_encoding(&CharacterEncoding::Ascii);
+        byte_string.elements.extend_from_slice(trimmed);
+        Some(byte_string)
     }
 }
 
@@ -369,7 +369,7 @@ mod tests {
     fn test_read_data() -> Result<(), ErrorTrace> {
         let test_data: Vec<u8> = get_test_data();
 
-        let mut test_struct = CdFsVolumeDescriptor::new();
+        let mut test_struct: CdFsVolumeDescriptor = CdFsVolumeDescriptor::new();
         test_struct.read_data(&test_data)?;
 
         assert_eq!(test_struct.type_indicator, 1);
@@ -387,10 +387,10 @@ mod tests {
 
     #[test]
     fn test_read_data_with_unsupported_data_size() {
-        let mut test_struct = CdFsVolumeDescriptor::new();
+        let mut test_struct: CdFsVolumeDescriptor = CdFsVolumeDescriptor::new();
 
         let test_data: Vec<u8> = get_test_data();
-        let result = test_struct.read_data(&test_data[0..2047]);
+        let result: Result<(), ErrorTrace> = test_struct.read_data(&test_data[0..2047]);
         assert!(result.is_err());
     }
 
@@ -399,8 +399,39 @@ mod tests {
         let mut test_data: Vec<u8> = get_test_data();
         test_data[1] = 0xff;
 
-        let mut test_struct = CdFsVolumeDescriptor::new();
-        let result = test_struct.read_data(&test_data);
+        let mut test_struct: CdFsVolumeDescriptor = CdFsVolumeDescriptor::new();
+        let result: Result<(), ErrorTrace> = test_struct.read_data(&test_data);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_with_endian_mismatches() {
+        for offset in [80, 120, 124, 128, 132] {
+            let mut test_data: Vec<u8> = get_test_data();
+            test_data[offset] ^= 0xff;
+
+            let mut test_struct: CdFsVolumeDescriptor = CdFsVolumeDescriptor::new();
+            let result: Result<(), ErrorTrace> = test_struct.read_data(&test_data);
+            assert!(result.is_err());
+        }
+    }
+
+    #[test]
+    fn test_read_trimmed_string() {
+        let result: Option<ByteString> = CdFsVolumeDescriptor::read_trimmed_string(b"AB", 1, 5);
+        assert_eq!(result, None);
+
+        let result: Option<ByteString> = CdFsVolumeDescriptor::read_trimmed_string(b"  \0 ", 0, 4);
+        assert_eq!(result, None);
+
+        let result: Option<ByteString> =
+            CdFsVolumeDescriptor::read_trimmed_string(b"TEST \0", 0, 6);
+        assert_eq!(
+            result,
+            Some(ByteString {
+                encoding: CharacterEncoding::Ascii,
+                elements: b"TEST".to_vec(),
+            })
+        );
     }
 }

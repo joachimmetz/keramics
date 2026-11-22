@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn test_read_data() -> Result<(), ErrorTrace> {
-        let mut test_struct = CdFsExtendedAttributeRecord::new();
+        let mut test_struct: CdFsExtendedAttributeRecord = CdFsExtendedAttributeRecord::new();
 
         let test_data: Vec<u8> = get_test_data();
         test_struct.read_data(&test_data)?;
@@ -207,32 +207,44 @@ mod tests {
 
     #[test]
     fn test_read_data_with_unsupported_data_size() {
-        let mut test_struct = CdFsExtendedAttributeRecord::new();
+        let mut test_struct: CdFsExtendedAttributeRecord = CdFsExtendedAttributeRecord::new();
 
         let test_data: Vec<u8> = get_test_data();
-        let result = test_struct.read_data(&test_data[0..77]);
+        let result: Result<(), ErrorTrace> = test_struct.read_data(&test_data[0..77]);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_read_data_with_owner_identifier_mismatch() {
-        let mut test_struct = CdFsExtendedAttributeRecord::new();
+        let mut test_struct: CdFsExtendedAttributeRecord = CdFsExtendedAttributeRecord::new();
 
         let mut test_data: Vec<u8> = get_test_data();
         test_data[0] = 0xff;
 
-        let result = test_struct.read_data(&test_data);
+        let result: Result<(), ErrorTrace> = test_struct.read_data(&test_data);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_read_data_with_group_identifier_mismatch() {
-        let mut test_struct = CdFsExtendedAttributeRecord::new();
+        let mut test_struct: CdFsExtendedAttributeRecord = CdFsExtendedAttributeRecord::new();
 
         let mut test_data: Vec<u8> = get_test_data();
         test_data[4] = 0xff;
 
-        let result = test_struct.read_data(&test_data);
+        let result: Result<(), ErrorTrace> = test_struct.read_data(&test_data);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_data_with_invalid_date_time() {
+        for offset in [10, 27, 44, 61] {
+            let mut test_struct: CdFsExtendedAttributeRecord = CdFsExtendedAttributeRecord::new();
+            let mut test_data: Vec<u8> = get_test_data();
+            test_data[offset] = b'x';
+
+            let result: Result<(), ErrorTrace> = test_struct.read_data(&test_data);
+            assert!(result.is_err());
+        }
     }
 }

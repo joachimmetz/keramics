@@ -15,9 +15,10 @@ use keramics_types::ByteString;
 
 use crate::path_component::PathComponent;
 
-/// A CDFS file entry name.
+/// CD file system (CDFS) file entry name.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct CdFsFileName {
+    /// Name.
     name: ByteString,
 }
 

@@ -169,20 +169,6 @@ impl<'a> fmt::Display for CdFsFileEntryInfo<'a> {
 pub struct CdFsInfo {}
 
 impl CdFsInfo {
-    /// Opens a volume.
-    pub fn open_volume(data_stream: &DataStreamReference) -> Result<CdFsVolume, ErrorTrace> {
-        let mut cdfs_volume: CdFsVolume = CdFsVolume::new();
-
-        match cdfs_volume.read_data_stream(data_stream) {
-            Ok(_) => {}
-            Err(mut error) => {
-                keramics_core::error_trace_add_frame!(error, "Unable to open CDFS volume");
-                return Err(error);
-            }
-        }
-        Ok(cdfs_volume)
-    }
-
     /// Retrieves a file system.
     fn get_file_system(data_stream: &DataStreamReference) -> Result<CdFsFileSystem, ErrorTrace> {
         let cdfs_volume: CdFsVolume = match Self::open_volume(data_stream) {
@@ -201,51 +187,18 @@ impl CdFsInfo {
         }
     }
 
-    /// Prints information about a volume.
-    pub fn print_volume(data_stream: &DataStreamReference) -> Result<(), ErrorTrace> {
-        let cdfs_volume: CdFsVolume = match Self::open_volume(data_stream) {
-            Ok(cdfs_volume) => cdfs_volume,
+    /// Opens a volume.
+    pub fn open_volume(data_stream: &DataStreamReference) -> Result<CdFsVolume, ErrorTrace> {
+        let mut cdfs_volume: CdFsVolume = CdFsVolume::new();
+
+        match cdfs_volume.read_data_stream(data_stream) {
+            Ok(_) => {}
             Err(mut error) => {
-                keramics_core::error_trace_add_frame!(error, "Unable to open volume");
+                keramics_core::error_trace_add_frame!(error, "Unable to open CDFS volume");
                 return Err(error);
             }
-        };
-        let volume_info: CdFsVolumeInfo = CdFsVolumeInfo::new(&cdfs_volume);
-
-        print!("{}", volume_info);
-
-        Ok(())
-    }
-
-    /// Prints the file entry by path.
-    pub fn print_file_entry_by_path(
-        data_stream: &DataStreamReference,
-        path: &Path,
-    ) -> Result<(), ErrorTrace> {
-        let cdfs_file_system: CdFsFileSystem = match Self::get_file_system(data_stream) {
-            Ok(cdfs_file_system) => cdfs_file_system,
-            Err(mut error) => {
-                keramics_core::error_trace_add_frame!(error, "Unable to open file system");
-                return Err(error);
-            }
-        };
-        let file_entry: CdFsFileEntry = match cdfs_file_system.get_file_entry_by_path(path) {
-            Ok(Some(file_entry)) => file_entry,
-            Ok(None) => return Err(keramics_core::error_trace_new!("Missing file entry")),
-            Err(mut error) => {
-                keramics_core::error_trace_add_frame!(error, "Unable to retrieve file entry");
-                return Err(error);
-            }
-        };
-        println!("CD file system (CDFS) file entry information:");
-
-        println!("    Path\t\t\t\t\t: {}", path);
-
-        let file_entry_information: CdFsFileEntryInfo = CdFsFileEntryInfo::new(&file_entry);
-
-        print!("{}", file_entry_information);
-
-        Ok(())
+        }
+        Ok(cdfs_volume)
     }
 
     /// Prints the file entry by identifier, i.e. the offset of the directory record.
@@ -275,6 +228,37 @@ impl CdFsInfo {
                 }
             };
         println!("CD file system (CDFS) file entry information:");
+
+        let file_entry_information: CdFsFileEntryInfo = CdFsFileEntryInfo::new(&file_entry);
+
+        print!("{}", file_entry_information);
+
+        Ok(())
+    }
+
+    /// Prints the file entry by path.
+    pub fn print_file_entry_by_path(
+        data_stream: &DataStreamReference,
+        path: &Path,
+    ) -> Result<(), ErrorTrace> {
+        let cdfs_file_system: CdFsFileSystem = match Self::get_file_system(data_stream) {
+            Ok(cdfs_file_system) => cdfs_file_system,
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, "Unable to open file system");
+                return Err(error);
+            }
+        };
+        let file_entry: CdFsFileEntry = match cdfs_file_system.get_file_entry_by_path(path) {
+            Ok(Some(file_entry)) => file_entry,
+            Ok(None) => return Err(keramics_core::error_trace_new!("Missing file entry")),
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, "Unable to retrieve file entry");
+                return Err(error);
+            }
+        };
+        println!("CD file system (CDFS) file entry information:");
+
+        println!("    Path\t\t\t\t\t: {}", path);
 
         let file_entry_information: CdFsFileEntryInfo = CdFsFileEntryInfo::new(&file_entry);
 
@@ -414,6 +398,22 @@ impl CdFsInfo {
         }
         Ok(())
     }
+
+    /// Prints information about a volume.
+    pub fn print_volume(data_stream: &DataStreamReference) -> Result<(), ErrorTrace> {
+        let cdfs_volume: CdFsVolume = match Self::open_volume(data_stream) {
+            Ok(cdfs_volume) => cdfs_volume,
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, "Unable to open volume");
+                return Err(error);
+            }
+        };
+        let volume_information: CdFsVolumeInfo = CdFsVolumeInfo::new(&cdfs_volume);
+
+        print!("{}", volume_information);
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -422,13 +422,17 @@ mod tests {
 
     use std::path::PathBuf;
 
-    use keramics_core::open_os_data_stream;
+    use keramics_core::{open_fake_data_stream, open_os_data_stream};
 
     use crate::assert_lines_eq;
 
-    fn get_volume_system() -> Result<CdFsVolume, ErrorTrace> {
+    fn get_data_stream() -> Result<DataStreamReference, ErrorTrace> {
         let path_buf: PathBuf = PathBuf::from("../test_data/cdfs/level3.iso");
-        let data_stream: DataStreamReference = open_os_data_stream(&path_buf)?;
+        open_os_data_stream(&path_buf)
+    }
+
+    fn get_volume_system() -> Result<CdFsVolume, ErrorTrace> {
+        let data_stream: DataStreamReference = get_data_stream()?;
         CdFsInfo::open_volume(&data_stream)
     }
 
@@ -484,15 +488,91 @@ mod tests {
         let string: String = test_struct.to_string();
         assert_eq!(string, "rxrxrx (0x5550)");
 
-        // owner-read + other-read: "r- -r--"
+        // Owner-read and other-read permissions.
         let test_struct: CdFsFilePermissionsInfo = CdFsFilePermissionsInfo::new(0x0010 | 0x1000);
 
         let string: String = test_struct.to_string();
         assert_eq!(string, "r---r- (0x1010)");
     }
 
-    // TODO: add tests for open_volume
-    // TODO: add tests for print_volume
-    // TODO: add tests for print_file_entry_by_path
-    // TODO: add tests for print_file_entry_by_identifier
+    #[test]
+    fn test_open_volume() -> Result<(), ErrorTrace> {
+        let data_stream: DataStreamReference = get_data_stream()?;
+        let volume: CdFsVolume = CdFsInfo::open_volume(&data_stream)?;
+        assert_eq!(volume.get_format_version(), 1);
+
+        let invalid_stream: DataStreamReference = open_fake_data_stream(&[0; 100]);
+        let result: Result<CdFsVolume, ErrorTrace> = CdFsInfo::open_volume(&invalid_stream);
+        assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_print_volume() -> Result<(), ErrorTrace> {
+        let data_stream: DataStreamReference = get_data_stream()?;
+        CdFsInfo::print_volume(&data_stream)?;
+
+        let invalid_stream: DataStreamReference = open_fake_data_stream(&[0; 100]);
+        let result: Result<(), ErrorTrace> = CdFsInfo::print_volume(&invalid_stream);
+        assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_print_file_entry_by_path() -> Result<(), ErrorTrace> {
+        let data_stream: DataStreamReference = get_data_stream()?;
+
+        CdFsInfo::print_file_entry_by_path(&data_stream, &Path::from("/emptyfile"))?;
+        CdFsInfo::print_file_entry_by_path(&data_stream, &Path::from("/testdir1/testfile1"))?;
+
+        let result: Result<(), ErrorTrace> =
+            CdFsInfo::print_file_entry_by_path(&data_stream, &Path::from("/nonexistent"));
+        assert!(result.is_err());
+
+        let invalid_stream: DataStreamReference = open_fake_data_stream(&[0; 100]);
+        let result: Result<(), ErrorTrace> =
+            CdFsInfo::print_file_entry_by_path(&invalid_stream, &Path::from("/"));
+        assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_print_file_entry_by_identifier() -> Result<(), ErrorTrace> {
+        let data_stream: DataStreamReference = get_data_stream()?;
+
+        CdFsInfo::print_file_entry_by_identifier(&data_stream, 32924)?;
+        CdFsInfo::print_file_entry_by_identifier(&data_stream, 47172)?;
+
+        let result: Result<(), ErrorTrace> =
+            CdFsInfo::print_file_entry_by_identifier(&data_stream, 1);
+        assert!(result.is_err());
+
+        let invalid_stream: DataStreamReference = open_fake_data_stream(&[0; 100]);
+        let result: Result<(), ErrorTrace> =
+            CdFsInfo::print_file_entry_by_identifier(&invalid_stream, 32924);
+        assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_print_hierarchy() -> Result<(), ErrorTrace> {
+        let data_stream: DataStreamReference = get_data_stream()?;
+
+        CdFsInfo::print_hierarchy(&data_stream, None)?;
+        CdFsInfo::print_hierarchy(&data_stream, Some(&String::from("/testdir1")))?;
+
+        let result: Result<(), ErrorTrace> =
+            CdFsInfo::print_hierarchy(&data_stream, Some(&String::from("/nonexistent")));
+        assert!(result.is_err());
+
+        let invalid_stream: DataStreamReference = open_fake_data_stream(&[0; 100]);
+        let result: Result<(), ErrorTrace> = CdFsInfo::print_hierarchy(&invalid_stream, None);
+        assert!(result.is_err());
+
+        Ok(())
+    }
 }

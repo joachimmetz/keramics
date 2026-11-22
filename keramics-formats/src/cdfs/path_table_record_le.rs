@@ -28,7 +28,7 @@ use super::path_table_record::CdFsPathTableRecord;
     ),
     methods("debug_read_data")
 )]
-/// CD file system (CDFS) little-endian (type L) path table record
+/// CD file system (CDFS) little-endian (type L) path table record.
 pub struct CdFsPathTableRecordLittleEndian {}
 
 impl CdFsPathTableRecordLittleEndian {
@@ -73,7 +73,7 @@ mod tests {
     fn test_read_data() -> Result<(), ErrorTrace> {
         let test_data: Vec<u8> = get_test_data();
 
-        let mut test_struct = CdFsPathTableRecord::new();
+        let mut test_struct: CdFsPathTableRecord = CdFsPathTableRecord::new();
         CdFsPathTableRecordLittleEndian::read_data(&mut test_struct, &test_data)?;
 
         assert_eq!(test_struct.extended_attribute_record_size, 0);
@@ -88,7 +88,7 @@ mod tests {
     fn test_read_data_with_unsupported_data_size() {
         let test_data: Vec<u8> = vec![0x01, 0x00, 0x17];
 
-        let mut test_struct = CdFsPathTableRecord::new();
+        let mut test_struct: CdFsPathTableRecord = CdFsPathTableRecord::new();
         let result: Result<(), ErrorTrace> =
             CdFsPathTableRecordLittleEndian::read_data(&mut test_struct, &test_data);
         assert!(result.is_err());
@@ -98,7 +98,7 @@ mod tests {
     fn test_read_data_with_unsupported_name_size() {
         let test_data: Vec<u8> = vec![0x02, 0x00, 0x17, 0x00, 0x00, 0x00, 0x01, 0x00];
 
-        let mut test_struct = CdFsPathTableRecord::new();
+        let mut test_struct: CdFsPathTableRecord = CdFsPathTableRecord::new();
         let result: Result<(), ErrorTrace> =
             CdFsPathTableRecordLittleEndian::read_data(&mut test_struct, &test_data);
         assert!(result.is_err());
