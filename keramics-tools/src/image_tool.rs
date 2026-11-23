@@ -443,6 +443,9 @@ impl ImageTool {
                     file_reference >> 48,
                 )
             }
+            VfsFileEntry::Ufs(ufs_file_entry) => {
+                format!("{}", ufs_file_entry.get_inode_number())
+            }
             VfsFileEntry::Xfs(xfs_file_entry) => {
                 format!("{}", xfs_file_entry.get_inode_number())
             }
@@ -454,6 +457,7 @@ impl ImageTool {
             VfsFileEntry::Apfs(_)
             | VfsFileEntry::Ext(_)
             | VfsFileEntry::Hfs(_)
+            | VfsFileEntry::Ufs(_)
             | VfsFileEntry::Xfs(_) => match file_entry.get_file_mode() {
                 Some(file_mode) => {
                     let file_mode_info: FileModeInfo = FileModeInfo::new(file_mode);

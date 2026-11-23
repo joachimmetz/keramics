@@ -25,6 +25,7 @@ use super::cdsaencr::constants::*;
 use super::enums::FormatIdentifier;
 use super::ewf::constants::*;
 use super::ext::constants::*;
+use super::ffs::constants::*;
 use super::gpt::constants::*;
 use super::hfs::constants::*;
 use super::linuxlvm::constants::*;
@@ -375,6 +376,60 @@ impl FormatScanner {
         ));
     }
 
+    /// Adds Unix File System (UFS) / Fast File System (FFS) signatures.
+    pub fn add_ufs_signatures(&mut self) {
+        // FFS1 (UFS1) superblock at offset 8192 (signature at 8192 + 1372 = 9564).
+        let ufs1_signature_le: Signature = Signature::new(
+            "ufs1_le",
+            PatternType::BoundToStart,
+            9564,
+            FFS1_SUPERBLOCK_SIGNATURE_LE,
+        );
+        self.signature_scanner.add_signature(ufs1_signature_le);
+
+        let ufs1_signature_be: Signature = Signature::new(
+            "ufs1_be",
+            PatternType::BoundToStart,
+            9564,
+            FFS1_SUPERBLOCK_SIGNATURE_BE,
+        );
+        self.signature_scanner.add_signature(ufs1_signature_be);
+
+        // FFS2 (UFS2) superblock at offset 65536 (signature at 65536 + 1372 = 66908).
+        let ufs2_signature_le: Signature = Signature::new(
+            "ufs2_le",
+            PatternType::BoundToStart,
+            66908,
+            FFS2_SUPERBLOCK_SIGNATURE_LE,
+        );
+        self.signature_scanner.add_signature(ufs2_signature_le);
+
+        let ufs2_signature_be: Signature = Signature::new(
+            "ufs2_be",
+            PatternType::BoundToStart,
+            66908,
+            FFS2_SUPERBLOCK_SIGNATURE_BE,
+        );
+        self.signature_scanner.add_signature(ufs2_signature_be);
+
+        // NetBSD FFS2EA (UFS2EA) superblock at offset 65536.
+        let ufs2ea_signature_le: Signature = Signature::new(
+            "ufs2ea_le",
+            PatternType::BoundToStart,
+            66908,
+            FFS2EA_SUPERBLOCK_SIGNATURE_LE,
+        );
+        self.signature_scanner.add_signature(ufs2ea_signature_le);
+
+        let ufs2ea_signature_be: Signature = Signature::new(
+            "ufs2ea_be",
+            PatternType::BoundToStart,
+            66908,
+            FFS2EA_SUPERBLOCK_SIGNATURE_BE,
+        );
+        self.signature_scanner.add_signature(ufs2ea_signature_be);
+    }
+
     /// Adds Virtual Disk Image (VDI) signatures.
     pub fn add_vdi_signatures(&mut self) {
         self.signature_scanner.add_signature(Signature::new(
@@ -530,6 +585,9 @@ impl FormatScanner {
                 "sgilabel1" => FormatIdentifier::SgiDiskLabel,
                 "sparseimage1" => FormatIdentifier::SparseImage,
                 "udif1" => FormatIdentifier::Udif,
+                "ufs1_le" | "ufs1_be" | "ufs2_le" | "ufs2_be" | "ufs2ea_le" | "ufs2ea_be" => {
+                    FormatIdentifier::Ufs
+                }
                 "vdi1" => FormatIdentifier::Vdi,
                 "vhd1" => FormatIdentifier::Vhd,
                 "vhdx1" => FormatIdentifier::Vhdx,
@@ -578,6 +636,7 @@ mod tests {
         format_scanner.add_sgilabel_signatures();
         format_scanner.add_sparseimage_signatures();
         format_scanner.add_udif_signatures();
+        format_scanner.add_ufs_signatures();
         format_scanner.add_vdi_signatures();
         format_scanner.add_vhd_signatures();
         format_scanner.add_vhdx_signatures();
@@ -609,7 +668,7 @@ mod tests {
         assert_eq!(scan_results.iter().next(), Some(&FormatIdentifier::Qcow));
 
         // Test header-bound signatures for all supported formats.
-        let header_cases: [(usize, &[u8], FormatIdentifier); 24] = [
+        let header_cases: [(usize, &[u8], FormatIdentifier); 26] = [
             (
                 32,
                 APFS_CONTAINER_SUPERBLOCK_SIGNATURE,
@@ -648,6 +707,8 @@ mod tests {
                 SPARSEIMAGE_FILE_HEADER_SIGNATURE,
                 FormatIdentifier::SparseImage,
             ),
+            (9564, FFS1_SUPERBLOCK_SIGNATURE_LE, FormatIdentifier::Ufs),
+            (66908, FFS2_SUPERBLOCK_SIGNATURE_LE, FormatIdentifier::Ufs),
             (64, VDI_FILE_HEADER_SIGNATURE, FormatIdentifier::Vdi),
             (0, VHDX_FILE_HEADER_SIGNATURE, FormatIdentifier::Vhdx),
             (0, VMDK_SPARSE_FILE_HEADER_SIGNATURE, FormatIdentifier::Vmdk),

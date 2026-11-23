@@ -292,6 +292,7 @@ impl DisplayPath {
                         | VfsType::Hfs
                         | VfsType::LinuxLvm
                         | VfsType::Ntfs
+                        | VfsType::Ufs
                         | VfsType::Volsnap
                         | VfsType::Xfs => match self.get_path(parent) {
                             Ok(parent_display_path) => {

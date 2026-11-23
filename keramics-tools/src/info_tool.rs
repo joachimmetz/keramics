@@ -41,8 +41,8 @@ use crate::enums::{DisplayPathType, EncodingType, FormatType};
 use crate::info::{
     ApfsInfo, ApmInfo, BdeInfo, BsdDiskLabelInfo, CdsaEncrInfo, CpioInfo, EwfInfo, ExFatInfo,
     ExtInfo, FatInfo, GptInfo, HfsInfo, LinuxLvmInfo, LuksInfo, MbrInfo, NtfsInfo, PdiInfo,
-    QcowInfo, SgiDiskLabelInfo, SparseBundleInfo, SparseImageInfo, UdifInfo, VdiInfo, VhdInfo,
-    VhdxInfo, VmdkInfo, VolsnapInfo, XfsInfo,
+    QcowInfo, SgiDiskLabelInfo, SparseBundleInfo, SparseImageInfo, UdifInfo, UfsInfo, VdiInfo,
+    VhdInfo, VhdxInfo, VmdkInfo, VolsnapInfo, XfsInfo,
 };
 use crate::range_file_resolver::RangeFileResolver;
 use crate::storage_media_image::StorageMediaImage;
@@ -212,6 +212,23 @@ impl InfoTool {
                         Some(format_identifier) => {
                             if format_identifier == &FormatIdentifier::Fat {
                                 Some(FormatIdentifier::Bde)
+                            } else {
+                                None
+                            }
+                        }
+                        None => None,
+                    }
+                }
+            } else if scan_results.contains(&FormatIdentifier::BsdDiskLabel) {
+                // A BSD disklabel can reside inside the reserved boot area of a UFS partition.
+                let mut scan_results_copy: HashSet<FormatIdentifier> = scan_results.clone();
+                scan_results_copy.remove(&FormatIdentifier::BsdDiskLabel);
+
+                if scan_results_copy.len() == 1 {
+                    result = match scan_results_copy.iter().next() {
+                        Some(format_identifier) => {
+                            if format_identifier == &FormatIdentifier::Ufs {
+                                Some(FormatIdentifier::BsdDiskLabel)
                             } else {
                                 None
                             }
@@ -395,6 +412,7 @@ impl InfoTool {
         format_scanner.add_luksde_signatures();
         format_scanner.add_ntfs_signatures();
         format_scanner.add_sgilabel_signatures();
+        format_scanner.add_ufs_signatures();
         format_scanner.add_volsnap_signatures();
         format_scanner.add_xfs_signatures();
 
@@ -643,6 +661,7 @@ fn main() -> ExitCode {
         Some(FormatType::SparseBundle) => FormatIdentifier::SparseBundle,
         Some(FormatType::SparseImage) => FormatIdentifier::SparseImage,
         Some(FormatType::Udif) => FormatIdentifier::Udif,
+        Some(FormatType::Ufs) => FormatIdentifier::Ufs,
         Some(FormatType::Vdi) => FormatIdentifier::Vdi,
         Some(FormatType::Vhd) => FormatIdentifier::Vhd,
         Some(FormatType::Vhdx) => FormatIdentifier::Vhdx,
@@ -688,6 +707,11 @@ fn main() -> ExitCode {
             FormatIdentifier::Ntfs => {
                 NtfsInfo::print_file_entry_by_identifier(&data_stream, command_arguments.entry)
             }
+            FormatIdentifier::Ufs => UfsInfo::print_file_entry_by_identifier(
+                &data_stream,
+                command_arguments.entry,
+                info_tool.character_encoding.as_ref(),
+            ),
             FormatIdentifier::Xfs => XfsInfo::print_file_entry_by_identifier(
                 &data_stream,
                 command_arguments.entry,
@@ -722,6 +746,11 @@ fn main() -> ExitCode {
             FormatIdentifier::Ntfs => {
                 NtfsInfo::print_hierarchy(&data_stream, command_arguments.path.as_ref())
             }
+            FormatIdentifier::Ufs => UfsInfo::print_hierarchy(
+                &data_stream,
+                info_tool.character_encoding.as_ref(),
+                command_arguments.path.as_ref(),
+            ),
             FormatIdentifier::Xfs => XfsInfo::print_hierarchy(
                 &data_stream,
                 info_tool.character_encoding.as_ref(),
@@ -751,6 +780,11 @@ fn main() -> ExitCode {
                 FormatIdentifier::Fat => FatInfo::print_file_entry_by_path(&data_stream, &path),
                 FormatIdentifier::Hfs => HfsInfo::print_file_entry_by_path(&data_stream, &path),
                 FormatIdentifier::Ntfs => NtfsInfo::print_file_entry_by_path(&data_stream, &path),
+                FormatIdentifier::Ufs => UfsInfo::print_file_entry_by_path(
+                    &data_stream,
+                    &path,
+                    info_tool.character_encoding.as_ref(),
+                ),
                 FormatIdentifier::Xfs => XfsInfo::print_file_entry_by_path(
                     &data_stream,
                     &path,
@@ -801,6 +835,9 @@ fn main() -> ExitCode {
             FormatIdentifier::SparseBundle => SparseBundleInfo::print_image(&arguments.source),
             FormatIdentifier::SparseImage => SparseImageInfo::print_file(&data_stream),
             FormatIdentifier::Udif => UdifInfo::print_image(&arguments.source),
+            FormatIdentifier::Ufs => {
+                UfsInfo::print_file_system(&data_stream, info_tool.character_encoding.as_ref())
+            }
             // TODO: add support for VDI image.
             FormatIdentifier::Vdi => VdiInfo::print_file(&data_stream),
             // TODO: add support for VHD image.
@@ -912,6 +949,19 @@ mod tests {
             HashSet::from([FormatIdentifier::Bde, FormatIdentifier::Ntfs]);
         let result: Result<Option<FormatIdentifier>, ErrorTrace> =
             info_tool.check_scan_results(&bde_ntfs);
+        assert!(result.is_err());
+
+        // Test BSD disklabel signature disambiguation.
+        let bsdlabel_ufs: HashSet<FormatIdentifier> =
+            HashSet::from([FormatIdentifier::BsdDiskLabel, FormatIdentifier::Ufs]);
+        let bsdlabel_result: Option<FormatIdentifier> =
+            info_tool.check_scan_results(&bsdlabel_ufs)?;
+        assert_eq!(bsdlabel_result, Some(FormatIdentifier::BsdDiskLabel));
+
+        let bsdlabel_ext: HashSet<FormatIdentifier> =
+            HashSet::from([FormatIdentifier::BsdDiskLabel, FormatIdentifier::Ext]);
+        let result: Result<Option<FormatIdentifier>, ErrorTrace> =
+            info_tool.check_scan_results(&bsdlabel_ext);
         assert!(result.is_err());
 
         // Test UDIF signature disambiguation.
@@ -1125,6 +1175,33 @@ mod tests {
             info_tool.scan_for_formats(&xfs_stream)?,
             Some(FormatIdentifier::Xfs)
         );
+
+        // Test UFS test images (which include a BSD disklabel in the boot area) and raw UFS streams.
+        let ufs1_path: PathBuf = PathBuf::from("../test_data/ufs/ufs1.raw");
+        let ufs1_stream: DataStreamReference = info_tool.get_data_stream(&ufs1_path, 0)?;
+        let ufs1_format: Option<FormatIdentifier> = info_tool.scan_for_formats(&ufs1_stream)?;
+        assert_eq!(ufs1_format, Some(FormatIdentifier::BsdDiskLabel));
+
+        let ufs2_path: PathBuf = PathBuf::from("../test_data/ufs/ufs2.raw");
+        let ufs2_stream: DataStreamReference = info_tool.get_data_stream(&ufs2_path, 0)?;
+        let ufs2_format: Option<FormatIdentifier> = info_tool.scan_for_formats(&ufs2_stream)?;
+        assert_eq!(ufs2_format, Some(FormatIdentifier::BsdDiskLabel));
+
+        let mut raw_ufs1_data: Vec<u8> = vec![0; 16384];
+        raw_ufs1_data[9564..9568].copy_from_slice(&[0x54, 0x19, 0x01, 0x00]);
+        let raw_ufs1_stream: DataStreamReference =
+            keramics_core::open_fake_data_stream(&raw_ufs1_data);
+        let raw_ufs1_format: Option<FormatIdentifier> =
+            info_tool.scan_for_formats(&raw_ufs1_stream)?;
+        assert_eq!(raw_ufs1_format, Some(FormatIdentifier::Ufs));
+
+        let mut raw_ufs2_data: Vec<u8> = vec![0; 73728];
+        raw_ufs2_data[66908..66912].copy_from_slice(&[0x19, 0x01, 0x54, 0x19]);
+        let raw_ufs2_stream: DataStreamReference =
+            keramics_core::open_fake_data_stream(&raw_ufs2_data);
+        let raw_ufs2_format: Option<FormatIdentifier> =
+            info_tool.scan_for_formats(&raw_ufs2_stream)?;
+        assert_eq!(raw_ufs2_format, Some(FormatIdentifier::Ufs));
 
         // Test contents mode auto-detection across storage media images.
         let contents_tool: InfoTool = InfoTool::new(&None, true, 0);

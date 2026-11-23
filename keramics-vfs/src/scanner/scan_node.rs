@@ -76,6 +76,7 @@ impl VfsScanNode {
             | VfsType::Fat
             | VfsType::Hfs
             | VfsType::Ntfs
+            | VfsType::Ufs
             | VfsType::Xfs => true,
             VfsType::ApfsContainer
             | VfsType::Apm
@@ -147,6 +148,7 @@ mod tests {
             VfsType::Fat,
             VfsType::Hfs,
             VfsType::Ntfs,
+            VfsType::Ufs,
             VfsType::Xfs,
         ] {
             let vfs_location: VfsLocation = VfsLocation::new_base(&vfs_type, Path::from("/"));

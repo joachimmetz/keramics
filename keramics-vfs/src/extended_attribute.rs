@@ -16,6 +16,7 @@ use keramics_formats::PathComponent;
 use keramics_formats::apfs::ApfsExtendedAttribute;
 use keramics_formats::ext::ExtExtendedAttribute;
 use keramics_formats::hfs::{HfsExtendedAttribute, HfsString};
+use keramics_formats::ufs::UfsExtendedAttribute;
 use keramics_formats::xfs::XfsExtendedAttribute;
 
 /// Virtual File System (VFS) extended attribute.
@@ -23,6 +24,7 @@ pub enum VfsExtendedAttribute {
     Apfs(ApfsExtendedAttribute),
     Ext(ExtExtendedAttribute),
     Hfs(HfsExtendedAttribute),
+    Ufs(UfsExtendedAttribute),
     Xfs(XfsExtendedAttribute),
 }
 
@@ -38,6 +40,9 @@ impl VfsExtendedAttribute {
             }
             VfsExtendedAttribute::Hfs(hfs_extended_attribute) => {
                 hfs_extended_attribute.get_data_stream()
+            }
+            VfsExtendedAttribute::Ufs(ufs_extended_attribute) => {
+                ufs_extended_attribute.get_data_stream()
             }
             VfsExtendedAttribute::Xfs(xfs_extended_attribute) => {
                 xfs_extended_attribute.get_data_stream()
@@ -59,6 +64,9 @@ impl VfsExtendedAttribute {
                     HfsString::ByteString(byte_string) => PathComponent::from(byte_string),
                     HfsString::Utf16String(utf16_string) => PathComponent::from(utf16_string),
                 }
+            }
+            VfsExtendedAttribute::Ufs(ufs_extended_attribute) => {
+                PathComponent::from(ufs_extended_attribute.get_name())
             }
             VfsExtendedAttribute::Xfs(xfs_extended_attribute) => {
                 PathComponent::from(xfs_extended_attribute.get_name())

@@ -23,10 +23,12 @@ A file system format is used to manage the storage of files.
 * [Apple File System Compression (decmpfs)](decmpfs.md)
 * [Extended File System (ext)](ext.md)
 * [Extensible File Allocation Table (exFAT)](exfat.md)
+* [Fast File System (FFS)](ffs.md)
 * [File Allocation Table (FAT)](fat.md)
 * [Hierarchical File System (HFS)](hfs.md)
 * [Macintosh File System (MFS)](mfs.md)
 * [New Technologies File System (NTFS)](ntfs.md)
+* [Unix File System (UFS)](ufs.md)
 * [X File System (XFS)](xfs.md)
 
 Also see: [hybrid volume and file system formats](hybrid.md)

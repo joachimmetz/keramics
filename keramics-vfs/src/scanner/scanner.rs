@@ -208,6 +208,7 @@ impl VfsScanner {
         self.file_system_scanner.add_fat_signatures();
         self.file_system_scanner.add_hfs_signatures();
         self.file_system_scanner.add_ntfs_signatures();
+        self.file_system_scanner.add_ufs_signatures();
         self.file_system_scanner.add_xfs_signatures();
 
         match self.file_system_scanner.build() {
@@ -244,6 +245,7 @@ impl VfsScanner {
             FormatIdentifier::SparseImage => Some(VfsType::SparseImage),
             FormatIdentifier::SplitRaw => Some(VfsType::SplitRaw),
             FormatIdentifier::Udif => Some(VfsType::Udif),
+            FormatIdentifier::Ufs => Some(VfsType::Ufs),
             FormatIdentifier::Vdi => Some(VfsType::Vdi),
             FormatIdentifier::Vhd => Some(VfsType::Vhd),
             FormatIdentifier::Vhdx => Some(VfsType::Vhdx),
@@ -466,6 +468,7 @@ impl VfsScanner {
             | VfsType::Fat
             | VfsType::Hfs
             | VfsType::Ntfs
+            | VfsType::Ufs
             | VfsType::Xfs => Err(keramics_core::error_trace_new!(
                 "Unsupported VFS location type"
             )),
@@ -488,6 +491,12 @@ impl VfsScanner {
                         return Err(error);
                     }
                 };
+                // A BSD disklabel partition starting at offset 0 overlaps the disklabel at offset 512.
+                if vfs_location.get_type() == &VfsType::BsdDiskLabel
+                    && result == Some(FormatIdentifier::BsdDiskLabel)
+                {
+                    result = None;
+                }
                 if result.is_none() {
                     result = match self.scan_for_file_system_format(&data_stream) {
                         Ok(scan_results) => scan_results,
@@ -1165,6 +1174,7 @@ impl VfsScanner {
             | VfsType::Fat
             | VfsType::Hfs
             | VfsType::Ntfs
+            | VfsType::Ufs
             | VfsType::Xfs => {}
             VfsType::ApfsContainer => {
                 let mut apfs_container: ApfsContainer = ApfsContainer::new();
@@ -2184,6 +2194,22 @@ mod tests {
     }
 
     #[test]
+    fn test_scan_for_file_system_format_with_ufs() -> Result<(), ErrorTrace> {
+        let format_scanner: VfsScanner = get_format_scanner()?;
+
+        for relative_path in ["ufs/ufs1.raw", "ufs/ufs2.raw"] {
+            let path_string: String = get_test_data_path(relative_path);
+            let data_stream: DataStreamReference = get_data_stream(path_string.as_str())?;
+            let format_identifier: FormatIdentifier = format_scanner
+                .scan_for_file_system_format(&data_stream)?
+                .unwrap();
+
+            assert_eq!(format_identifier, FormatIdentifier::Ufs);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn test_scan_for_file_system_format_with_xfs() -> Result<(), ErrorTrace> {
         let format_scanner: VfsScanner = get_format_scanner()?;
 
@@ -2529,7 +2555,7 @@ mod tests {
 
     #[test]
     fn test_get_vfs_type() {
-        let mappings: [(FormatIdentifier, Option<VfsType>); 28] = [
+        let mappings: [(FormatIdentifier, Option<VfsType>); 29] = [
             (FormatIdentifier::Apfs, Some(VfsType::ApfsContainer)),
             (FormatIdentifier::Apm, Some(VfsType::Apm)),
             (FormatIdentifier::Bde, Some(VfsType::Bde)),
@@ -2551,6 +2577,7 @@ mod tests {
             (FormatIdentifier::SparseImage, Some(VfsType::SparseImage)),
             (FormatIdentifier::SplitRaw, Some(VfsType::SplitRaw)),
             (FormatIdentifier::Udif, Some(VfsType::Udif)),
+            (FormatIdentifier::Ufs, Some(VfsType::Ufs)),
             (FormatIdentifier::Vdi, Some(VfsType::Vdi)),
             (FormatIdentifier::Vhd, Some(VfsType::Vhd)),
             (FormatIdentifier::Vhdx, Some(VfsType::Vhdx)),
@@ -2712,6 +2739,22 @@ mod tests {
             assert_eq!(scan_node.get_type(), &VfsType::Os);
             assert_eq!(scan_node.sub_nodes.len(), 1);
             assert_eq!(scan_node.sub_nodes[0].get_type(), &expected_type);
+        }
+
+        // Test UFS inside BSD disklabel (both offset > 0 and offset == 0).
+        for relative_path in ["bsdlabel/bsdlabel.raw", "ufs/ufs1.raw", "ufs/ufs2.raw"] {
+            let mut scan_context: VfsScanContext = VfsScanContext::new();
+            let path_string: String = get_test_data_path(relative_path);
+            let vfs_location: VfsLocation = VfsLocation::from(&path_string);
+            format_scanner.scan(&scan_options, &mut scan_context, &vfs_location)?;
+
+            let scan_node: &VfsScanNode = scan_context.root_node.as_ref().unwrap();
+            let bsdlabel_node: &VfsScanNode = &scan_node.sub_nodes[0];
+            assert_eq!(bsdlabel_node.get_type(), &VfsType::BsdDiskLabel);
+            let partition_node: &VfsScanNode = &bsdlabel_node.sub_nodes[0];
+            assert_eq!(partition_node.get_type(), &VfsType::BsdDiskLabel);
+            let ufs_node: &VfsScanNode = &partition_node.sub_nodes[0];
+            assert_eq!(ufs_node.get_type(), &VfsType::Ufs);
         }
 
         // Test BDE inside VHD + MBR.

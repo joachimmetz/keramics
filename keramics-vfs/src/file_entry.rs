@@ -24,6 +24,8 @@ use keramics_formats::fat::{FatFileEntry, FatString};
 use keramics_formats::hfs::constants::*;
 use keramics_formats::hfs::{HfsFileEntry, HfsString};
 use keramics_formats::ntfs::NtfsFileEntry;
+use keramics_formats::ufs::UfsFileEntry;
+use keramics_formats::ufs::constants::*;
 use keramics_formats::xfs::XfsFileEntry;
 use keramics_formats::xfs::constants::*;
 use keramics_formats::{ExtendedAttributeIterator, FileEntryIterator, Path, PathComponent};
@@ -85,6 +87,7 @@ pub enum VfsFileEntry {
     SparseImage(SparseImageFileEntry),
     SplitRaw(SplitRawFileEntry),
     Udif(UdifFileEntry),
+    Ufs(UfsFileEntry),
     Vdi(VdiFileEntry),
     Vhd(VhdFileEntry),
     Vhdx(VhdxFileEntry),
@@ -126,6 +129,7 @@ impl VfsFileEntry {
             VfsFileEntry::Hfs(hfs_file_entry) => hfs_file_entry.get_access_time(),
             VfsFileEntry::Ntfs(ntfs_file_entry) => ntfs_file_entry.get_access_time(),
             VfsFileEntry::Os(os_file_entry) => os_file_entry.get_access_time(),
+            VfsFileEntry::Ufs(ufs_file_entry) => Some(ufs_file_entry.get_access_time()),
             VfsFileEntry::Xfs(xfs_file_entry) => Some(xfs_file_entry.get_access_time()),
         }
     }
@@ -162,6 +166,7 @@ impl VfsFileEntry {
             VfsFileEntry::Hfs(hfs_file_entry) => hfs_file_entry.get_change_time(),
             VfsFileEntry::Ntfs(ntfs_file_entry) => ntfs_file_entry.get_entry_modification_time(),
             VfsFileEntry::Os(os_file_entry) => os_file_entry.get_change_time(),
+            VfsFileEntry::Ufs(ufs_file_entry) => Some(ufs_file_entry.get_change_time()),
             VfsFileEntry::Xfs(xfs_file_entry) => Some(xfs_file_entry.get_change_time()),
         }
     }
@@ -198,6 +203,7 @@ impl VfsFileEntry {
             VfsFileEntry::Hfs(hfs_file_entry) => Some(hfs_file_entry.get_creation_time()),
             VfsFileEntry::Ntfs(ntfs_file_entry) => ntfs_file_entry.get_creation_time(),
             VfsFileEntry::Os(os_file_entry) => os_file_entry.get_creation_time(),
+            VfsFileEntry::Ufs(ufs_file_entry) => ufs_file_entry.get_creation_time(),
             VfsFileEntry::Xfs(xfs_file_entry) => xfs_file_entry.get_creation_time(),
         }
     }
@@ -239,6 +245,9 @@ impl VfsFileEntry {
                 .get_device_identifier()
                 .map(|device_identifier| *device_identifier as u64),
             VfsFileEntry::Os(os_file_entry) => os_file_entry.get_device_identifier(),
+            VfsFileEntry::Ufs(ufs_file_entry) => ufs_file_entry
+                .get_device_identifier()
+                .map(|device_identifier| *device_identifier as u64),
             VfsFileEntry::Xfs(xfs_file_entry) => xfs_file_entry
                 .get_device_identifier()
                 .map(|device_identifier| *device_identifier as u64),
@@ -279,6 +288,7 @@ impl VfsFileEntry {
                 .get_file_mode()
                 .map(|file_mode| *file_mode as u32),
             VfsFileEntry::Os(os_file_entry) => os_file_entry.get_file_mode(),
+            VfsFileEntry::Ufs(ufs_file_entry) => Some(ufs_file_entry.get_file_mode() as u32),
             VfsFileEntry::Xfs(xfs_file_entry) => Some(xfs_file_entry.get_file_mode() as u32),
         }
     }
@@ -380,6 +390,20 @@ impl VfsFileEntry {
             }
             VfsFileEntry::SplitRaw(splitraw_file_entry) => splitraw_file_entry.get_file_type(),
             VfsFileEntry::Udif(udif_file_entry) => udif_file_entry.get_file_type(),
+            VfsFileEntry::Ufs(ufs_file_entry) => {
+                let file_type: u16 = ufs_file_entry.get_file_mode() & 0xf000;
+                match file_type {
+                    UFS_FILE_MODE_TYPE_FIFO => VfsFileType::NamedPipe,
+                    UFS_FILE_MODE_TYPE_CHARACTER_DEVICE => VfsFileType::CharacterDevice,
+                    UFS_FILE_MODE_TYPE_DIRECTORY => VfsFileType::Directory,
+                    UFS_FILE_MODE_TYPE_BLOCK_DEVICE => VfsFileType::BlockDevice,
+                    UFS_FILE_MODE_TYPE_REGULAR_FILE => VfsFileType::File,
+                    UFS_FILE_MODE_TYPE_SYMBOLIC_LINK => VfsFileType::SymbolicLink,
+                    UFS_FILE_MODE_TYPE_SOCKET => VfsFileType::Socket,
+                    UFS_FILE_MODE_TYPE_WHITEOUT => VfsFileType::Whiteout,
+                    _ => VfsFileType::Unknown(file_type),
+                }
+            }
             VfsFileEntry::Vdi(vdi_file_entry) => vdi_file_entry.get_file_type(),
             VfsFileEntry::Vhd(vhd_file_entry) => vhd_file_entry.get_file_type(),
             VfsFileEntry::Vhdx(vhdx_file_entry) => vhdx_file_entry.get_file_type(),
@@ -433,6 +457,7 @@ impl VfsFileEntry {
             VfsFileEntry::Hfs(hfs_file_entry) => Some(hfs_file_entry.get_modification_time()),
             VfsFileEntry::Ntfs(ntfs_file_entry) => ntfs_file_entry.get_modification_time(),
             VfsFileEntry::Os(os_file_entry) => os_file_entry.get_modification_time(),
+            VfsFileEntry::Ufs(ufs_file_entry) => Some(ufs_file_entry.get_modification_time()),
             VfsFileEntry::Xfs(xfs_file_entry) => Some(xfs_file_entry.get_modification_time()),
         }
     }
@@ -469,6 +494,7 @@ impl VfsFileEntry {
             VfsFileEntry::Ext(ext_file_entry) => Some(ext_file_entry.get_group_identifier()),
             VfsFileEntry::Hfs(hfs_file_entry) => hfs_file_entry.get_group_identifier().cloned(),
             VfsFileEntry::Os(os_file_entry) => os_file_entry.get_group_identifier(),
+            VfsFileEntry::Ufs(ufs_file_entry) => Some(ufs_file_entry.get_group_identifier()),
             VfsFileEntry::Xfs(xfs_file_entry) => Some(xfs_file_entry.get_group_identifier()),
         }
     }
@@ -506,6 +532,7 @@ impl VfsFileEntry {
             VfsFileEntry::Ext(ext_file_entry) => Some(ext_file_entry.get_inode_number() as u64),
             VfsFileEntry::Hfs(hfs_file_entry) => Some(hfs_file_entry.get_identifier() as u64),
             VfsFileEntry::Os(os_file_entry) => os_file_entry.get_inode_number(),
+            VfsFileEntry::Ufs(ufs_file_entry) => Some(ufs_file_entry.get_inode_number() as u64),
             VfsFileEntry::Xfs(xfs_file_entry) => Some(xfs_file_entry.get_inode_number()),
         }
     }
@@ -563,6 +590,7 @@ impl VfsFileEntry {
             }
             VfsFileEntry::SplitRaw(splitraw_file_entry) => Some(splitraw_file_entry.get_name()),
             VfsFileEntry::Udif(udif_file_entry) => Some(udif_file_entry.get_name()),
+            VfsFileEntry::Ufs(ufs_file_entry) => ufs_file_entry.get_name().map(PathComponent::from),
             VfsFileEntry::Vdi(vdi_file_entry) => Some(vdi_file_entry.get_name()),
             VfsFileEntry::Vhd(vhd_file_entry) => Some(vhd_file_entry.get_name()),
             VfsFileEntry::Vhdx(vhdx_file_entry) => Some(vhdx_file_entry.get_name()),
@@ -606,6 +634,7 @@ impl VfsFileEntry {
             VfsFileEntry::Ext(ext_file_entry) => Some(ext_file_entry.get_number_of_links() as u64),
             VfsFileEntry::Hfs(hfs_file_entry) => Some(hfs_file_entry.get_number_of_links() as u64),
             VfsFileEntry::Os(os_file_entry) => os_file_entry.get_number_of_links(),
+            VfsFileEntry::Ufs(ufs_file_entry) => Some(ufs_file_entry.get_number_of_links() as u64),
             VfsFileEntry::Xfs(xfs_file_entry) => Some(xfs_file_entry.get_number_of_links() as u64),
         }
     }
@@ -642,6 +671,7 @@ impl VfsFileEntry {
             VfsFileEntry::Ext(ext_file_entry) => Some(ext_file_entry.get_owner_identifier()),
             VfsFileEntry::Hfs(hfs_file_entry) => hfs_file_entry.get_owner_identifier().cloned(),
             VfsFileEntry::Os(os_file_entry) => os_file_entry.get_owner_identifier(),
+            VfsFileEntry::Ufs(ufs_file_entry) => Some(ufs_file_entry.get_owner_identifier()),
             VfsFileEntry::Xfs(xfs_file_entry) => Some(xfs_file_entry.get_owner_identifier()),
         }
     }
@@ -677,6 +707,7 @@ impl VfsFileEntry {
             VfsFileEntry::SparseImage(sparseimage_file_entry) => sparseimage_file_entry.get_size(),
             VfsFileEntry::SplitRaw(splitraw_file_entry) => splitraw_file_entry.get_size(),
             VfsFileEntry::Udif(udif_file_entry) => udif_file_entry.get_size(),
+            VfsFileEntry::Ufs(ufs_file_entry) => ufs_file_entry.get_size(),
             VfsFileEntry::Vdi(vdi_file_entry) => vdi_file_entry.get_size(),
             VfsFileEntry::Vhd(vhd_file_entry) => vhd_file_entry.get_size(),
             VfsFileEntry::Vhdx(vhdx_file_entry) => vhdx_file_entry.get_size(),
@@ -782,6 +813,19 @@ impl VfsFileEntry {
                 Some(link_target) => Ok(Some(Path::from(&link_target))),
                 None => Ok(None),
             },
+            VfsFileEntry::Ufs(ufs_file_entry) => match ufs_file_entry.get_symbolic_link_target() {
+                Ok(result) => match result {
+                    Some(symbolic_link_target) => Ok(Some(Path::from(symbolic_link_target))),
+                    None => Ok(None),
+                },
+                Err(mut error) => {
+                    keramics_core::error_trace_add_frame!(
+                        error,
+                        "Unable to retrieve UFS symbolic link target"
+                    );
+                    Err(error)
+                }
+            },
             VfsFileEntry::Xfs(xfs_file_entry) => match xfs_file_entry.get_symbolic_link_target() {
                 Ok(result) => match result {
                     Some(symbolic_link_target) => Ok(Some(Path::from(symbolic_link_target))),
@@ -825,6 +869,7 @@ impl VfsFileEntry {
             VfsFileEntry::SparseImage(_) => VfsType::SparseImage,
             VfsFileEntry::SplitRaw(_) => VfsType::SplitRaw,
             VfsFileEntry::Udif(_) => VfsType::Udif,
+            VfsFileEntry::Ufs(_) => VfsType::Ufs,
             VfsFileEntry::Vdi(_) => VfsType::Vdi,
             VfsFileEntry::Vhd(_) => VfsType::Vhd,
             VfsFileEntry::Vhdx(_) => VfsType::Vhdx,
@@ -962,6 +1007,15 @@ impl VfsFileEntry {
                 UdifFileEntry::Layer { .. } => 1,
                 UdifFileEntry::Root { .. } => 0,
             },
+            VfsFileEntry::Ufs(ufs_file_entry) => {
+                let file_type: u16 = ufs_file_entry.get_file_mode() & 0xf000;
+
+                if file_type != UFS_FILE_MODE_TYPE_REGULAR_FILE {
+                    0
+                } else {
+                    1
+                }
+            }
             VfsFileEntry::Vdi(vdi_file_entry) => match vdi_file_entry {
                 VdiFileEntry::Layer { .. } => 1,
                 VdiFileEntry::Root { .. } => 0,
@@ -1028,6 +1082,7 @@ impl VfsFileEntry {
             | VfsFileEntry::SparseImage(_)
             | VfsFileEntry::SplitRaw(_)
             | VfsFileEntry::Udif(_)
+            | VfsFileEntry::Ufs(_)
             | VfsFileEntry::Vdi(_)
             | VfsFileEntry::Vhd(_)
             | VfsFileEntry::Vhdx(_)
@@ -1132,6 +1187,7 @@ impl VfsFileEntry {
             }
             VfsFileEntry::SplitRaw(splitraw_file_entry) => splitraw_file_entry.get_data_stream(),
             VfsFileEntry::Udif(udif_file_entry) => udif_file_entry.get_data_stream(),
+            VfsFileEntry::Ufs(ufs_file_entry) => ufs_file_entry.get_data_stream(),
             VfsFileEntry::Vdi(vdi_file_entry) => vdi_file_entry.get_data_stream(),
             VfsFileEntry::Vhd(vhd_file_entry) => vhd_file_entry.get_data_stream(),
             VfsFileEntry::Vhdx(vhdx_file_entry) => vhdx_file_entry.get_data_stream(),
@@ -1177,6 +1233,7 @@ impl VfsFileEntry {
             | VfsFileEntry::SparseImage(_)
             | VfsFileEntry::SplitRaw(_)
             | VfsFileEntry::Udif(_)
+            | VfsFileEntry::Ufs(_)
             | VfsFileEntry::Vdi(_)
             | VfsFileEntry::Vhd(_)
             | VfsFileEntry::Vhdx(_)
@@ -1253,6 +1310,14 @@ impl VfsFileEntry {
                     None => Ok(None),
                 }
             }
+            VfsFileEntry::Ufs(ufs_file_entry) => {
+                match ufs_file_entry.get_extended_attribute_by_name(extended_attribute_name)? {
+                    Some(ufs_extended_attribute) => {
+                        Ok(Some(VfsExtendedAttribute::Ufs(ufs_extended_attribute)))
+                    }
+                    None => Ok(None),
+                }
+            }
             VfsFileEntry::Xfs(xfs_file_entry) => {
                 match xfs_file_entry.get_extended_attribute_by_name(extended_attribute_name)? {
                     Some(xfs_extended_attribute) => {
@@ -1323,6 +1388,7 @@ impl VfsFileEntry {
             }
             VfsFileEntry::SplitRaw(splitraw_file_entry) => splitraw_file_entry.is_root_file_entry(),
             VfsFileEntry::Udif(udif_file_entry) => udif_file_entry.is_root_file_entry(),
+            VfsFileEntry::Ufs(ufs_file_entry) => ufs_file_entry.is_root_directory(),
             VfsFileEntry::Vdi(vdi_file_entry) => vdi_file_entry.is_root_file_entry(),
             VfsFileEntry::Vhd(vhd_file_entry) => vhd_file_entry.is_root_file_entry(),
             VfsFileEntry::Vhdx(vhdx_file_entry) => vhdx_file_entry.is_root_file_entry(),
@@ -1370,6 +1436,7 @@ impl ExtendedAttributeIterator for VfsFileEntry {
             }
             VfsFileEntry::Ext(ext_file_entry) => ext_file_entry.get_number_of_extended_attributes(),
             VfsFileEntry::Hfs(hfs_file_entry) => hfs_file_entry.get_number_of_extended_attributes(),
+            VfsFileEntry::Ufs(ufs_file_entry) => ufs_file_entry.get_number_of_extended_attributes(),
             VfsFileEntry::Xfs(xfs_file_entry) => xfs_file_entry.get_number_of_extended_attributes(),
         };
         match result {
@@ -1424,6 +1491,9 @@ impl ExtendedAttributeIterator for VfsFileEntry {
             ))),
             VfsFileEntry::Hfs(hfs_file_entry) => Ok(Some(VfsExtendedAttribute::Hfs(
                 hfs_file_entry.get_extended_attribute_by_index(extended_attribute_index)?,
+            ))),
+            VfsFileEntry::Ufs(ufs_file_entry) => Ok(Some(VfsExtendedAttribute::Ufs(
+                ufs_file_entry.get_extended_attribute_by_index(extended_attribute_index)?,
             ))),
             VfsFileEntry::Xfs(xfs_file_entry) => Ok(Some(VfsExtendedAttribute::Xfs(
                 xfs_file_entry.get_extended_attribute_by_index(extended_attribute_index)?,
@@ -1530,6 +1600,9 @@ impl FileEntryIterator for VfsFileEntry {
             VfsFileEntry::Udif(udif_file_entry) => Ok(VfsFileEntry::Udif(
                 udif_file_entry.get_sub_file_entry_by_index(sub_file_entry_index)?,
             )),
+            VfsFileEntry::Ufs(ufs_file_entry) => Ok(VfsFileEntry::Ufs(
+                ufs_file_entry.get_sub_file_entry_by_index(sub_file_entry_index)?,
+            )),
             VfsFileEntry::Vdi(vdi_file_entry) => Ok(VfsFileEntry::Vdi(
                 vdi_file_entry.get_sub_file_entry_by_index(sub_file_entry_index)?,
             )),
@@ -1627,6 +1700,7 @@ impl FileEntryIterator for VfsFileEntry {
             VfsFileEntry::Udif(udif_file_entry) => {
                 Ok(udif_file_entry.get_number_of_sub_file_entries())
             }
+            VfsFileEntry::Ufs(ufs_file_entry) => ufs_file_entry.get_number_of_sub_file_entries(),
             VfsFileEntry::Vdi(vdi_file_entry) => {
                 Ok(vdi_file_entry.get_number_of_sub_file_entries())
             }
@@ -11942,6 +12016,165 @@ mod tests {
         Ok(())
     }
 
+    // Tests with UFS.
+
+    fn get_ufs_file_entry(
+        relative_path: &str,
+        entry_path: &str,
+    ) -> Result<VfsFileEntry, ErrorTrace> {
+        let mut vfs_file_system: VfsFileSystem = VfsFileSystem::new(&VfsType::Ufs);
+
+        let parent_file_system: VfsFileSystemReference =
+            VfsFileSystemReference::new(VfsFileSystem::new(&VfsType::Os));
+        let path_string: String = get_test_data_path(relative_path);
+        let vfs_location: VfsLocation = VfsLocation::from(&path_string);
+        vfs_file_system.open(Some(&parent_file_system), &vfs_location)?;
+
+        let path: Path = Path::from(entry_path);
+        match vfs_file_system.get_file_entry_by_path(&path)? {
+            Some(file_entry) => Ok(file_entry),
+            None => Err(keramics_core::error_trace_new!(format!(
+                "Missing file entry: {}",
+                entry_path
+            ))),
+        }
+    }
+
+    #[test]
+    fn test_ufs_file_entry_metadata_and_streams() -> Result<(), ErrorTrace> {
+        // Test UFS1 regular file (/testdir1/testfile1).
+        let mut ufs1_file: VfsFileEntry =
+            get_ufs_file_entry("ufs/ufs1.raw", "/testdir1/testfile1")?;
+
+        let access_time: Option<&DateTime> = ufs1_file.get_access_time();
+        let has_access_time: bool = access_time.is_some();
+        assert!(has_access_time);
+
+        let change_time: Option<&DateTime> = ufs1_file.get_change_time();
+        let has_change_time: bool = change_time.is_some();
+        assert!(has_change_time);
+
+        let creation_time: Option<&DateTime> = ufs1_file.get_creation_time();
+        assert_eq!(creation_time, None);
+
+        let modification_time: Option<&DateTime> = ufs1_file.get_modification_time();
+        let has_modification_time: bool = modification_time.is_some();
+        assert!(has_modification_time);
+
+        let device_identifier: Option<u64> = ufs1_file.get_device_identifier();
+        assert_eq!(device_identifier, None);
+
+        let file_mode: Option<u32> = ufs1_file.get_file_mode();
+        assert_eq!(file_mode, Some(0o100644));
+
+        let file_type: VfsFileType = ufs1_file.get_file_type();
+        assert_eq!(file_type, VfsFileType::File);
+
+        let owner_identifier: Option<u32> = ufs1_file.get_owner_identifier();
+        assert_eq!(owner_identifier, Some(0));
+
+        let group_identifier: Option<u32> = ufs1_file.get_group_identifier();
+        assert_eq!(group_identifier, Some(0));
+
+        let inode_number: Option<u64> = ufs1_file.get_inode_number();
+        assert_eq!(inode_number, Some(257));
+
+        let name: Option<PathComponent> = ufs1_file.get_name();
+        let expected_name: PathComponent = PathComponent::from(ByteString::from("testfile1"));
+        assert_eq!(name, Some(expected_name));
+
+        let number_of_links: Option<u64> = ufs1_file.get_number_of_links();
+        assert_eq!(number_of_links, Some(2));
+
+        let size: u64 = ufs1_file.get_size();
+        assert_eq!(size, 8);
+
+        let link_target: Option<Path> = ufs1_file.get_symbolic_link_target()?;
+        assert_eq!(link_target, None);
+
+        let number_of_data_forks: usize = ufs1_file.get_number_of_data_forks()?;
+        assert_eq!(number_of_data_forks, 1);
+
+        let data_fork_result: Result<VfsDataFork, ErrorTrace> = ufs1_file.get_data_fork_by_index(0);
+        assert!(data_fork_result.is_ok());
+
+        let data_stream: Option<DataStreamReference> = ufs1_file.get_data_stream()?;
+        let has_data_stream: bool = data_stream.is_some();
+        assert!(has_data_stream);
+
+        let default_stream: Option<DataStreamReference> =
+            ufs1_file.get_data_stream_by_name(None)?;
+        let has_default_stream: bool = default_stream.is_some();
+        assert!(has_default_stream);
+
+        let bogus_name: PathComponent = PathComponent::from("bogus");
+        let named_stream: Option<DataStreamReference> =
+            ufs1_file.get_data_stream_by_name(Some(&bogus_name))?;
+        let is_named_stream_none: bool = named_stream.is_none();
+        assert!(is_named_stream_none);
+
+        let number_of_xattrs: usize = ufs1_file.get_number_of_extended_attributes()?;
+        assert_eq!(number_of_xattrs, 0);
+
+        let xattr_by_name: Option<VfsExtendedAttribute> =
+            ufs1_file.get_extended_attribute_by_name(&bogus_name)?;
+        let is_xattr_none: bool = xattr_by_name.is_none();
+        assert!(is_xattr_none);
+
+        let xattr_by_index: Result<VfsExtendedAttribute, ErrorTrace> =
+            ufs1_file.get_extended_attribute_by_index(0);
+        assert!(xattr_by_index.is_err());
+
+        // Test UFS2 regular file (has creation/birth time) and directory iteration.
+        let ufs2_file: VfsFileEntry = get_ufs_file_entry("ufs/ufs2.raw", "/testdir1/testfile1")?;
+        let ufs2_creation_time: Option<&DateTime> = ufs2_file.get_creation_time();
+        let has_ufs2_creation_time: bool = ufs2_creation_time.is_some();
+        assert!(has_ufs2_creation_time);
+
+        let ufs2_inode_number: Option<u64> = ufs2_file.get_inode_number();
+        assert_eq!(ufs2_inode_number, Some(769));
+
+        let mut ufs2_dir: VfsFileEntry = get_ufs_file_entry("ufs/ufs2.raw", "/testdir1")?;
+        let dir_type: VfsFileType = ufs2_dir.get_file_type();
+        assert_eq!(dir_type, VfsFileType::Directory);
+
+        let dir_forks: usize = ufs2_dir.get_number_of_data_forks()?;
+        assert_eq!(dir_forks, 0);
+
+        let dir_stream: Option<DataStreamReference> = ufs2_dir.get_data_stream()?;
+        let is_dir_stream_none: bool = dir_stream.is_none();
+        assert!(is_dir_stream_none);
+
+        let number_of_sub_entries: usize = ufs2_dir.get_number_of_sub_file_entries()?;
+        assert_eq!(number_of_sub_entries, 2);
+
+        let sub_entry: VfsFileEntry = ufs2_dir.get_sub_file_entry_by_index(0)?;
+        let sub_entry_name: Option<PathComponent> = sub_entry.get_name();
+        let expected_sub_name: PathComponent = PathComponent::from(ByteString::from("testfile1"));
+        assert_eq!(sub_entry_name, Some(expected_sub_name));
+
+        let out_of_bounds_entry: Result<VfsFileEntry, ErrorTrace> =
+            ufs2_dir.get_sub_file_entry_by_index(99);
+        assert!(out_of_bounds_entry.is_err());
+
+        // Test UFS symbolic link target.
+        let mut ufs2_link: VfsFileEntry =
+            get_ufs_file_entry("ufs/ufs2.raw", "/file_symboliclink1")?;
+        let link_target: Option<Path> = ufs2_link.get_symbolic_link_target()?;
+        let expected_link_target: Path = Path {
+            components: vec![
+                PathComponent::Root,
+                PathComponent::ByteString(ByteString::from("mnt")),
+                PathComponent::ByteString(ByteString::from("keramics")),
+                PathComponent::ByteString(ByteString::from("testdir1")),
+                PathComponent::ByteString(ByteString::from("testfile1")),
+            ],
+        };
+        assert_eq!(link_target, Some(expected_link_target));
+
+        Ok(())
+    }
+
     #[test]
     fn test_get_type_and_is_root_directory() -> Result<(), ErrorTrace> {
         let entries: Vec<(VfsFileEntry, VfsType, bool)> = vec![
@@ -12048,6 +12281,18 @@ mod tests {
             (get_splitraw_file_entry("/raw1")?, VfsType::SplitRaw, false),
             (get_udif_file_entry("/")?, VfsType::Udif, true),
             (get_udif_file_entry("/udif1")?, VfsType::Udif, false),
+            (get_ufs_file_entry("ufs/ufs1.raw", "/")?, VfsType::Ufs, true),
+            (
+                get_ufs_file_entry("ufs/ufs1.raw", "/testdir1/testfile1")?,
+                VfsType::Ufs,
+                false,
+            ),
+            (get_ufs_file_entry("ufs/ufs2.raw", "/")?, VfsType::Ufs, true),
+            (
+                get_ufs_file_entry("ufs/ufs2.raw", "/testdir1/testfile1")?,
+                VfsType::Ufs,
+                false,
+            ),
             (get_vdi_file_entry("/")?, VfsType::Vdi, true),
             (get_vdi_file_entry("/vdi1")?, VfsType::Vdi, false),
             (get_vhd_file_entry("/")?, VfsType::Vhd, true),
@@ -12163,6 +12408,15 @@ mod tests {
             get_hfs_file_entry("/testdir1/pipe1")?.get_file_type(),
             VfsFileType::NamedPipe
         );
+
+        // UFS special file types.
+        let ufs1_link_type: VfsFileType =
+            get_ufs_file_entry("ufs/ufs1.raw", "/file_symboliclink1")?.get_file_type();
+        assert_eq!(ufs1_link_type, VfsFileType::SymbolicLink);
+
+        let ufs2_link_type: VfsFileType =
+            get_ufs_file_entry("ufs/ufs2.raw", "/directory_symboliclink1")?.get_file_type();
+        assert_eq!(ufs2_link_type, VfsFileType::SymbolicLink);
 
         // XFS special file types.
         assert_eq!(

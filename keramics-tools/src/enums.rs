@@ -279,6 +279,10 @@ pub enum FormatType {
     /// Universal Disk Image Format (UDIF)
     Udif,
 
+    /// Unix File System (UFS) / Fast File System (FFS)
+    #[value(alias("ffs"))]
+    Ufs,
+
     /// Virtual Disk Image (VDI)
     Vdi,
 

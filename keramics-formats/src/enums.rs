@@ -39,6 +39,7 @@ pub enum FormatIdentifier {
     SparseImage,
     SplitRaw,
     Udif,
+    Ufs,
     Unknown,
     Vdi,
     Vhd,
@@ -96,6 +97,7 @@ impl fmt::Display for FormatIdentifier {
             FormatIdentifier::SparseImage => "sparseimage",
             FormatIdentifier::SplitRaw => "splitraw",
             FormatIdentifier::Udif => "udif",
+            FormatIdentifier::Ufs => "ufs",
             FormatIdentifier::Unknown => "unknown",
             FormatIdentifier::Vdi => "vdi",
             FormatIdentifier::Vhd => "vhd",
@@ -205,6 +207,10 @@ mod tests {
         let format_identifier: FormatIdentifier = FormatIdentifier::Udif;
         let string: String = format_identifier.to_string();
         assert_eq!(string, "udif");
+
+        let format_identifier: FormatIdentifier = FormatIdentifier::Ufs;
+        let string: String = format_identifier.to_string();
+        assert_eq!(string, "ufs");
 
         let format_identifier: FormatIdentifier = FormatIdentifier::Unknown;
         let string: String = format_identifier.to_string();

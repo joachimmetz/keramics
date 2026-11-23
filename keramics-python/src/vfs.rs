@@ -812,6 +812,8 @@ pub enum PyVfsType {
     SplitRaw,
     #[pyo3(name = "UDIF")]
     Udif,
+    #[pyo3(name = "UFS")]
+    Ufs,
     #[pyo3(name = "VDI")]
     Vdi,
     #[pyo3(name = "VHD")]
@@ -855,6 +857,7 @@ impl From<&PyVfsType> for VfsType {
             PyVfsType::SparseImage => VfsType::SparseImage,
             PyVfsType::SplitRaw => VfsType::SplitRaw,
             PyVfsType::Udif => VfsType::Udif,
+            PyVfsType::Ufs => VfsType::Ufs,
             PyVfsType::Vdi => VfsType::Vdi,
             PyVfsType::Vhd => VfsType::Vhd,
             PyVfsType::Vhdx => VfsType::Vhdx,
@@ -924,6 +927,7 @@ mod tests {
         assert_eq!(VfsType::from(&PyVfsType::SparseImage), VfsType::SparseImage);
         assert_eq!(VfsType::from(&PyVfsType::SplitRaw), VfsType::SplitRaw);
         assert_eq!(VfsType::from(&PyVfsType::Udif), VfsType::Udif);
+        assert_eq!(VfsType::from(&PyVfsType::Ufs), VfsType::Ufs);
         assert_eq!(VfsType::from(&PyVfsType::Vdi), VfsType::Vdi);
         assert_eq!(VfsType::from(&PyVfsType::Vhd), VfsType::Vhd);
         assert_eq!(VfsType::from(&PyVfsType::Vhdx), VfsType::Vhdx);

@@ -18,6 +18,7 @@ use keramics_formats::ext::ExtFileSystem;
 use keramics_formats::fat::FatFileSystem;
 use keramics_formats::hfs::HfsFileSystem;
 use keramics_formats::ntfs::NtfsFileSystem;
+use keramics_formats::ufs::UfsFileSystem;
 use keramics_formats::xfs::XfsFileSystem;
 use keramics_formats::{Path, PathComponent};
 
@@ -75,6 +76,7 @@ pub enum VfsFileSystem {
     SparseImage(SparseImageFileSystem),
     SplitRaw(SplitRawFileSystem),
     Udif(UdifFileSystem),
+    Ufs(UfsFileSystem),
     Vdi(VdiFileSystem),
     Vhd(VhdFileSystem),
     Vhdx(VhdxFileSystem),
@@ -111,6 +113,7 @@ impl VfsFileSystem {
             VfsType::SparseImage => VfsFileSystem::SparseImage(SparseImageFileSystem::new()),
             VfsType::SplitRaw => VfsFileSystem::SplitRaw(SplitRawFileSystem::new()),
             VfsType::Udif => VfsFileSystem::Udif(UdifFileSystem::new()),
+            VfsType::Ufs => VfsFileSystem::Ufs(UfsFileSystem::new()),
             VfsType::Vdi => VfsFileSystem::Vdi(VdiFileSystem::new()),
             VfsType::Vhd => VfsFileSystem::Vhd(VhdFileSystem::new()),
             VfsType::Vhdx => VfsFileSystem::Vhdx(VhdxFileSystem::new()),
@@ -243,6 +246,19 @@ impl VfsFileSystem {
                 Ok(splitraw_file_system.file_entry_exists(path))
             }
             VfsFileSystem::Udif(udif_file_system) => Ok(udif_file_system.file_entry_exists(path)),
+            VfsFileSystem::Ufs(ufs_file_system) => {
+                match ufs_file_system.get_file_entry_by_path(path) {
+                    Ok(Some(_)) => Ok(true),
+                    Ok(None) => Ok(false),
+                    Err(mut error) => {
+                        keramics_core::error_trace_add_frame!(
+                            error,
+                            "Unable to retrieve UFS file entry"
+                        );
+                        Err(error)
+                    }
+                }
+            }
             VfsFileSystem::Vdi(vdi_file_system) => Ok(vdi_file_system.file_entry_exists(path)),
             VfsFileSystem::Vhd(vhd_file_system) => Ok(vhd_file_system.file_entry_exists(path)),
             VfsFileSystem::Vhdx(vhdx_file_system) => Ok(vhdx_file_system.file_entry_exists(path)),
@@ -482,6 +498,12 @@ impl VfsFileSystem {
                     None => Ok(None),
                 }
             }
+            VfsFileSystem::Ufs(ufs_file_system) => {
+                match ufs_file_system.get_file_entry_by_path(path)? {
+                    Some(file_entry) => Ok(Some(VfsFileEntry::Ufs(file_entry))),
+                    None => Ok(None),
+                }
+            }
             VfsFileSystem::Vdi(vdi_file_system) => {
                 match vdi_file_system.get_file_entry_by_path(path)? {
                     Some(vdi_file_entry) => Ok(Some(VfsFileEntry::Vdi(vdi_file_entry))),
@@ -703,6 +725,17 @@ impl VfsFileSystem {
 
                 Ok(Some(VfsFileEntry::Udif(udif_file_entry)))
             }
+            VfsFileSystem::Ufs(ufs_file_system) => match ufs_file_system.get_root_directory() {
+                Ok(Some(ufs_file_entry)) => Ok(Some(VfsFileEntry::Ufs(ufs_file_entry))),
+                Ok(None) => Ok(None),
+                Err(mut error) => {
+                    keramics_core::error_trace_add_frame!(
+                        error,
+                        "Unable to retrieve UFS root directory"
+                    );
+                    Err(error)
+                }
+            },
             VfsFileSystem::Vdi(vdi_file_system) => {
                 let vdi_file_entry: VdiFileEntry = vdi_file_system.get_root_file_entry();
 
@@ -771,6 +804,7 @@ impl VfsFileSystem {
             VfsFileSystem::SparseImage(_) => VfsType::SparseImage,
             VfsFileSystem::SplitRaw(_) => VfsType::SplitRaw,
             VfsFileSystem::Udif(_) => VfsType::Udif,
+            VfsFileSystem::Ufs(_) => VfsType::Ufs,
             VfsFileSystem::Vdi(_) => VfsType::Vdi,
             VfsFileSystem::Vhd(_) => VfsType::Vhd,
             VfsFileSystem::Vhdx(_) => VfsType::Vhdx,
@@ -867,6 +901,9 @@ impl VfsFileSystem {
             }
             VfsFileSystem::Udif(udif_file_system) => {
                 udif_file_system.open(parent_file_system, vfs_location)
+            }
+            VfsFileSystem::Ufs(ufs_file_system) => {
+                Self::open_ufs_file_system(ufs_file_system, parent_file_system, vfs_location)
             }
             VfsFileSystem::Vdi(vdi_file_system) => {
                 vdi_file_system.open(parent_file_system, vfs_location)
@@ -1149,6 +1186,48 @@ impl VfsFileSystem {
                 keramics_core::error_trace_add_frame!(
                     error,
                     "Unable to read NTFS file system from data stream"
+                );
+                Err(error)
+            }
+        }
+    }
+
+    /// Opens a UFS file system.
+    fn open_ufs_file_system(
+        ufs_file_system: &mut UfsFileSystem,
+        parent_file_system: Option<&VfsFileSystemReference>,
+        vfs_location: &VfsLocation,
+    ) -> Result<(), ErrorTrace> {
+        let file_system: &VfsFileSystemReference = match parent_file_system {
+            Some(file_system) => file_system,
+            None => {
+                return Err(keramics_core::error_trace_new!(
+                    "Missing parent file system"
+                ));
+            }
+        };
+        let path: &Path = vfs_location.get_path();
+
+        let data_stream: DataStreamReference =
+            match file_system.get_data_stream_by_path_and_name(path, None) {
+                Ok(Some(data_stream)) => data_stream,
+                Ok(None) => {
+                    return Err(keramics_core::error_trace_new!(format!(
+                        "Missing data stream: {}",
+                        path,
+                    )));
+                }
+                Err(mut error) => {
+                    keramics_core::error_trace_add_frame!(error, "Unable to retrieve data stream");
+                    return Err(error);
+                }
+            };
+        match ufs_file_system.read_data_stream(&data_stream) {
+            Ok(_) => Ok(()),
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(
+                    error,
+                    "Unable to read UFS file system from data stream"
                 );
                 Err(error)
             }
@@ -3128,6 +3207,78 @@ mod tests {
         Ok(())
     }
 
+    // Tests with UFS.
+
+    fn get_ufs_file_system(relative_path: &str) -> Result<VfsFileSystem, ErrorTrace> {
+        let mut vfs_file_system: VfsFileSystem = VfsFileSystem::new(&VfsType::Ufs);
+
+        let parent_file_system: VfsFileSystemReference =
+            VfsFileSystemReference::new(VfsFileSystem::new(&VfsType::Os));
+        let path_string: String = get_test_data_path(relative_path);
+        let vfs_location: VfsLocation = VfsLocation::from(&path_string);
+        vfs_file_system.open(Some(&parent_file_system), &vfs_location)?;
+
+        Ok(vfs_file_system)
+    }
+
+    #[test]
+    fn test_file_entry_exists_with_ufs() -> Result<(), ErrorTrace> {
+        for relative_path in ["ufs/ufs1.raw", "ufs/ufs2.raw"] {
+            let vfs_file_system: VfsFileSystem = get_ufs_file_system(relative_path)?;
+
+            let path: Path = Path::from("/testdir1/testfile1");
+            let exists: bool = vfs_file_system.file_entry_exists(&path)?;
+            assert!(exists);
+
+            let path: Path = Path::from("/bogus");
+            let exists: bool = vfs_file_system.file_entry_exists(&path)?;
+            assert!(!exists);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_file_entry_by_path_with_ufs_non_existing() -> Result<(), ErrorTrace> {
+        let vfs_file_system: VfsFileSystem = get_ufs_file_system("ufs/ufs2.raw")?;
+
+        let path: Path = Path::from("/bogus");
+        let result: Option<VfsFileEntry> = vfs_file_system.get_file_entry_by_path(&path)?;
+        let is_none: bool = result.is_none();
+        assert!(is_none);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_file_entry_by_path_with_ufs_file() -> Result<(), ErrorTrace> {
+        for relative_path in ["ufs/ufs1.raw", "ufs/ufs2.raw"] {
+            let vfs_file_system: VfsFileSystem = get_ufs_file_system(relative_path)?;
+
+            let path: Path = Path::from("/testdir1/testfile1");
+            let vfs_file_entry: VfsFileEntry =
+                vfs_file_system.get_file_entry_by_path(&path)?.unwrap();
+
+            let vfs_file_type: VfsFileType = vfs_file_entry.get_file_type();
+            assert_eq!(vfs_file_type, VfsFileType::File);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_file_entry_by_path_with_ufs_root() -> Result<(), ErrorTrace> {
+        for relative_path in ["ufs/ufs1.raw", "ufs/ufs2.raw"] {
+            let vfs_file_system: VfsFileSystem = get_ufs_file_system(relative_path)?;
+
+            let path: Path = Path::from("/");
+            let vfs_file_entry: VfsFileEntry =
+                vfs_file_system.get_file_entry_by_path(&path)?.unwrap();
+
+            let vfs_file_type: VfsFileType = vfs_file_entry.get_file_type();
+            assert_eq!(vfs_file_type, VfsFileType::Directory);
+        }
+        Ok(())
+    }
+
     // Tests with XFS.
 
     fn get_xfs_file_system() -> Result<VfsFileSystem, ErrorTrace> {
@@ -3222,6 +3373,7 @@ mod tests {
             VfsType::SparseImage,
             VfsType::SplitRaw,
             VfsType::Udif,
+            VfsType::Ufs,
             VfsType::Vdi,
             VfsType::Vhd,
             VfsType::Vhdx,
@@ -3261,6 +3413,8 @@ mod tests {
             get_sparseimage_file_system()?,
             get_splitraw_file_system()?,
             get_udif_file_system()?,
+            get_ufs_file_system("ufs/ufs1.raw")?,
+            get_ufs_file_system("ufs/ufs2.raw")?,
             get_vdi_file_system()?,
             get_vhd_file_system()?,
             get_vhdx_file_system()?,
@@ -3350,6 +3504,7 @@ mod tests {
             VfsType::Fat,
             VfsType::Hfs,
             VfsType::Ntfs,
+            VfsType::Ufs,
             VfsType::Xfs,
         ] {
             let mut file_system: VfsFileSystem = VfsFileSystem::new(&vfs_type);
@@ -3387,6 +3542,7 @@ mod tests {
             VfsType::Fat,
             VfsType::Hfs,
             VfsType::Ntfs,
+            VfsType::Ufs,
             VfsType::Xfs,
         ] {
             let mut file_system: VfsFileSystem = VfsFileSystem::new(&vfs_type);
