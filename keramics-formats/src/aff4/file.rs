@@ -321,35 +321,35 @@ mod tests {
             let crc_32: u32 = crc32_context.finalize();
 
             archive.extend_from_slice(&[0x50, 0x4b, 0x03, 0x04]);
-            archive.extend_from_slice(&20u16.to_le_bytes());
-            archive.extend_from_slice(&0u16.to_le_bytes());
-            archive.extend_from_slice(&0u16.to_le_bytes());
-            archive.extend_from_slice(&0u16.to_le_bytes());
-            archive.extend_from_slice(&0u16.to_le_bytes());
+            archive.extend_from_slice(&20_u16.to_le_bytes());
+            archive.extend_from_slice(&0_u16.to_le_bytes());
+            archive.extend_from_slice(&0_u16.to_le_bytes());
+            archive.extend_from_slice(&0_u16.to_le_bytes());
+            archive.extend_from_slice(&0_u16.to_le_bytes());
             archive.extend_from_slice(&crc_32.to_le_bytes());
             archive.extend_from_slice(&(data.len() as u32).to_le_bytes());
             archive.extend_from_slice(&(data.len() as u32).to_le_bytes());
             archive.extend_from_slice(&(file_name_bytes.len() as u16).to_le_bytes());
-            archive.extend_from_slice(&0u16.to_le_bytes());
+            archive.extend_from_slice(&0_u16.to_le_bytes());
             archive.extend_from_slice(file_name_bytes);
             archive.extend_from_slice(data);
 
             central_directory.extend_from_slice(&[0x50, 0x4b, 0x01, 0x02]);
-            central_directory.extend_from_slice(&20u16.to_le_bytes());
-            central_directory.extend_from_slice(&20u16.to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&20_u16.to_le_bytes());
+            central_directory.extend_from_slice(&20_u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
             central_directory.extend_from_slice(&crc_32.to_le_bytes());
             central_directory.extend_from_slice(&(data.len() as u32).to_le_bytes());
             central_directory.extend_from_slice(&(data.len() as u32).to_le_bytes());
             central_directory.extend_from_slice(&(file_name_bytes.len() as u16).to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
-            central_directory.extend_from_slice(&0u32.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u32.to_le_bytes());
             central_directory.extend_from_slice(&local_header_offset.to_le_bytes());
             central_directory.extend_from_slice(file_name_bytes);
         }
@@ -358,13 +358,13 @@ mod tests {
         archive.extend_from_slice(&central_directory);
 
         archive.extend_from_slice(&[0x50, 0x4b, 0x05, 0x06]);
-        archive.extend_from_slice(&0u16.to_le_bytes());
-        archive.extend_from_slice(&0u16.to_le_bytes());
+        archive.extend_from_slice(&0_u16.to_le_bytes());
+        archive.extend_from_slice(&0_u16.to_le_bytes());
         archive.extend_from_slice(&(entries.len() as u16).to_le_bytes());
         archive.extend_from_slice(&(entries.len() as u16).to_le_bytes());
         archive.extend_from_slice(&central_directory_size.to_le_bytes());
         archive.extend_from_slice(&central_directory_offset.to_le_bytes());
-        archive.extend_from_slice(&0u16.to_le_bytes());
+        archive.extend_from_slice(&0_u16.to_le_bytes());
 
         archive
     }

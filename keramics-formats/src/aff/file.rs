@@ -20,7 +20,7 @@ use crate::file_resolver::FileResolverReference;
 use crate::path_component::PathComponent;
 
 use super::constants::*;
-use super::segment::AffSegment;
+use super::segment::{AffSegment, AffSegmentHeader, AffSegmentTail};
 
 /// Retrieves the zero-based page number of a page from a segment name.
 fn get_page_index(name: &str) -> Option<usize> {
@@ -279,22 +279,23 @@ impl AffFile {
         let mut current_offset: u64 = AFF_FILE_SIGNATURE_SIZE;
 
         while current_offset < size {
-            let mut segment_header: [u8; AFF_SEGMENT_HEADER_SIZE as usize] =
-                [0; AFF_SEGMENT_HEADER_SIZE as usize];
-            keramics_core::data_stream_read_exact_at_position!(
-                data_stream.clone(),
-                &mut segment_header,
-                SeekFrom::Start(current_offset)
-            );
-            if segment_header[0..4] != AFF_SEGMENT_SIGNATURE {
-                return Err(keramics_core::error_trace_new!(format!(
-                    "Invalid segment header signature at offset: {} (0x{:08x})",
-                    current_offset, current_offset
-                )));
+            let mut segment_header: AffSegmentHeader = AffSegmentHeader::new();
+            match segment_header.read_at_position(data_stream, SeekFrom::Start(current_offset)) {
+                Ok(_) => {}
+                Err(mut error) => {
+                    keramics_core::error_trace_add_frame!(
+                        error,
+                        format!(
+                            "Unable to read segment header at offset: {} (0x{:08x})",
+                            current_offset, current_offset
+                        )
+                    );
+                    return Err(error);
+                }
             }
-            let name_length: u32 = u32::from_be_bytes(segment_header[4..8].try_into().unwrap());
-            let data_length: u32 = u32::from_be_bytes(segment_header[8..12].try_into().unwrap());
-            let flag: u32 = u32::from_be_bytes(segment_header[12..16].try_into().unwrap());
+            let name_length: u32 = segment_header.name_length;
+            let data_length: u32 = segment_header.data_length;
+            let flag: u32 = segment_header.flag;
 
             if name_length > AFF_MAXIMUM_SEGMENT_NAME_SIZE {
                 return Err(keramics_core::error_trace_new!(format!(
@@ -324,23 +325,23 @@ impl AffFile {
                 String::new()
             };
             let data_offset: u64 = name_offset + name_length as u64;
+            let tail_offset: u64 = data_offset + data_length as u64;
 
-            let mut segment_tail: [u8; AFF_SEGMENT_TAIL_SIZE as usize] =
-                [0; AFF_SEGMENT_TAIL_SIZE as usize];
-            keramics_core::data_stream_read_exact_at_position!(
-                data_stream.clone(),
-                &mut segment_tail,
-                SeekFrom::Start(data_offset + data_length as u64)
-            );
-            if segment_tail[0..4] != AFF_SEGMENT_TAIL_SIGNATURE {
-                return Err(keramics_core::error_trace_new!(format!(
-                    "Invalid segment tail signature of segment: {} at offset: {} (0x{:08x})",
-                    name,
-                    data_offset + data_length as u64,
-                    data_offset + data_length as u64
-                )));
+            let mut segment_tail: AffSegmentTail = AffSegmentTail::new();
+            match segment_tail.read_at_position(data_stream, SeekFrom::Start(tail_offset)) {
+                Ok(_) => {}
+                Err(mut error) => {
+                    keramics_core::error_trace_add_frame!(
+                        error,
+                        format!(
+                            "Unable to read segment tail of segment: {} at offset: {} (0x{:08x})",
+                            name, tail_offset, tail_offset
+                        )
+                    );
+                    return Err(error);
+                }
             }
-            let segment_size: u32 = u32::from_be_bytes(segment_tail[4..8].try_into().unwrap());
+            let segment_size: u32 = segment_tail.segment_size;
             let computed_size: u64 = AFF_SEGMENT_HEADER_SIZE
                 + name_length as u64
                 + data_length as u64
@@ -774,8 +775,8 @@ mod tests {
 
     #[test]
     fn test_read_data_stream_with_pagesize_and_sectorsize_from_data() -> Result<(), ErrorTrace> {
-        let page_size_data: [u8; 4] = 4096u32.to_be_bytes();
-        let sector_size_data: [u8; 4] = 1024u32.to_be_bytes();
+        let page_size_data: [u8; 4] = 4096_u32.to_be_bytes();
+        let sector_size_data: [u8; 4] = 1024_u32.to_be_bytes();
         let bad_sectors_data: [u8; 8] = [0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00];
         let test_data: Vec<u8> = build_test_aff(&[
             (b"pagesize", 0, &page_size_data),
@@ -809,7 +810,7 @@ mod tests {
         file.read_data_stream(&data_stream)?;
         assert_eq!(file.get_page_size(), 8192);
 
-        let segsize_data: [u8; 4] = 16384u32.to_be_bytes();
+        let segsize_data: [u8; 4] = 16384_u32.to_be_bytes();
         let test_data: Vec<u8> = build_test_aff(&[(b"segsize", 0, &segsize_data)]);
 
         let mut file: AffFile = AffFile::new();

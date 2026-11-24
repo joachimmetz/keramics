@@ -764,6 +764,10 @@ impl PyVfsResolver {
 #[pyo3(name = "VfsType")]
 #[derive(Clone, Debug, Hash, PartialEq)]
 pub enum PyVfsType {
+    #[pyo3(name = "AFF")]
+    Aff,
+    #[pyo3(name = "AFF4")]
+    Aff4,
     #[pyo3(name = "APFS")]
     Apfs,
     #[pyo3(name = "APFS_CONTAINER")]
@@ -831,6 +835,8 @@ impl From<&PyVfsType> for VfsType {
     #[inline(always)]
     fn from(vfs_type: &PyVfsType) -> Self {
         match vfs_type {
+            PyVfsType::Aff => VfsType::Aff,
+            PyVfsType::Aff4 => VfsType::Aff4,
             PyVfsType::Apfs => VfsType::Apfs,
             PyVfsType::ApfsContainer => VfsType::ApfsContainer,
             PyVfsType::Apm => VfsType::Apm,
@@ -888,6 +894,8 @@ mod tests {
 
     #[test]
     fn test_vfs_type_from_py_vfs_type() {
+        assert_eq!(VfsType::from(&PyVfsType::Aff), VfsType::Aff);
+        assert_eq!(VfsType::from(&PyVfsType::Aff4), VfsType::Aff4);
         assert_eq!(VfsType::from(&PyVfsType::Apfs), VfsType::Apfs);
         assert_eq!(
             VfsType::from(&PyVfsType::ApfsContainer),

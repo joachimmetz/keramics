@@ -443,7 +443,7 @@ mod tests {
         assert_eq!(read_size, size as usize);
 
         // The decompressed media is a UEFI GPT disk image containing an HFS+ volume.
-        assert_eq!(u16::from_be_bytes([data[510], data[511]]), 0x55AA);
+        assert_eq!(u16::from_be_bytes([data[510], data[511]]), 0x55aa);
         assert_eq!(&data[512..520], b"EFI PART");
         assert_eq!(&data[21504..21506], b"H+");
         assert_eq!(&data[1963520..1963528], b"EFI PART");

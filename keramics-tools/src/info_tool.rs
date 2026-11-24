@@ -1053,7 +1053,9 @@ mod tests {
     fn test_scan_for_formats_all_formats() -> Result<(), ErrorTrace> {
         let info_tool: InfoTool = InfoTool::new(&None, false, 0);
 
-        let format_cases: [(&str, FormatIdentifier); 32] = [
+        let format_cases: [(&str, FormatIdentifier); 34] = [
+            ("../test_data/aff/ext2.AFF", FormatIdentifier::Aff),
+            ("../test_data/aff4/ext2.aff4", FormatIdentifier::Aff4),
             ("../test_data/apfs/apfs.raw", FormatIdentifier::Apfs),
             ("../test_data/apm/apm.dmg", FormatIdentifier::Apm),
             (

@@ -59,6 +59,8 @@ impl Aff4NodeProperty {
     }
 
     /// Retrieves the value of the property with the specified index.
+    #[cfg(test)]
+    // Used for testing.
     pub fn get_value_by_index(&self, index: usize) -> Option<&str> {
         self.values.get(index).map(String::as_str)
     }
@@ -79,6 +81,8 @@ impl Aff4Node {
     }
 
     /// Retrieves the values of the property with the specified local name.
+    #[cfg(test)]
+    // Used for testing.
     pub fn get_property_values(&self, name: &str) -> Option<&[String]> {
         match self.get_property(name) {
             Some(property) => Some(property.values.as_slice()),

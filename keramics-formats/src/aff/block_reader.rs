@@ -424,7 +424,7 @@ mod tests {
     #[test]
     fn test_read_data_from_blocks_with_zero_page() -> Result<(), ErrorTrace> {
         let image_size_data: [u8; 8] = [0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00];
-        let zero_count: [u8; 4] = 32u32.to_be_bytes();
+        let zero_count: [u8; 4] = 32_u32.to_be_bytes();
         let test_data: Vec<u8> = build_test_aff(&[
             (b"pagesize", 32, b""),
             (b"imagesize", 0, &image_size_data),

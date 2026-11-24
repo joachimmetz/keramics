@@ -13,7 +13,7 @@
 
 use std::cmp::min;
 
-use keramics_compression::{DeflateContext, SnappyContext, ZlibContext};
+use keramics_compression::SnappyContext;
 use keramics_core::ErrorTrace;
 
 use crate::file_resolver::FileResolverReference;
@@ -121,9 +121,6 @@ struct ResolvedStream {
     /// Size of a single chunk in bytes.
     chunk_size: usize,
 
-    /// Number of chunks per bevy segment.
-    chunks_in_segment: usize,
-
     /// Compression method of the chunks.
     compression_method: CompressionMethod,
 
@@ -132,9 +129,6 @@ struct ResolvedStream {
 
     /// Zip file of the volume that stores the stream data.
     zip_file: ZipFile,
-
-    /// Prefix of the stream data entries in the volume.
-    entry_prefix: String,
 
     /// Resolved bevy segments.
     segments: Vec<ResolvedSegment>,
@@ -199,9 +193,6 @@ struct DataVolume {
     /// File name of the volume container.
     file_name: String,
 
-    /// Container URI of the volume.
-    container_uri: String,
-
     /// Volume URI of the volume.
     volume_uri: String,
 
@@ -262,6 +253,8 @@ impl DataVolume {
     }
 
     /// Retrieves the size of an entry with the specified name.
+    #[cfg(test)]
+    // Used for testing.
     fn get_entry_size(&self, file_name: &str) -> Option<u64> {
         self.zip_file
             .get_entry(file_name)
@@ -292,7 +285,6 @@ impl DataVolume {
         }
         Ok(DataVolume {
             file_name: file_name.to_string(),
-            container_uri: aff4_file.get_container_description().to_string(),
             volume_uri: aff4_file.get_volume_uri().to_string(),
             information: aff4_file.take_information(),
             zip_file: aff4_file.take_zip_file(),
@@ -360,9 +352,6 @@ impl DataVolume {
 /// entries), the map (if present) and the media (image) size.
 #[derive(Clone)]
 pub struct Aff4StandardMedia {
-    /// Data volumes (the volume and its companion volumes).
-    volumes: Vec<DataVolume>,
-
     /// Resolved data streams.
     streams: Vec<ResolvedStream>,
 
@@ -722,7 +711,6 @@ impl Aff4StandardMedia {
         };
 
         Ok(Aff4StandardMedia {
-            volumes,
             streams,
             map,
             media_size,
@@ -1042,11 +1030,9 @@ impl Aff4StandardMedia {
                     return Some(ResolvedStream {
                         name: identity.to_string(),
                         chunk_size,
-                        chunks_in_segment,
                         compression_method,
                         size,
                         zip_file: volume.zip_file.clone(),
-                        entry_prefix,
                         segments,
                     });
                 }
@@ -1311,36 +1297,24 @@ impl Aff4StandardReader {
                     }
                 }
                 CompressionMethod::Zlib => {
-                    let mut zlib_context: ZlibContext = ZlibContext::new();
-                    match zlib_context.decompress(compressed_data, &mut chunk) {
-                        Ok(_) => {}
-                        Err(mut error) => {
-                            keramics_core::error_trace_add_frame!(
-                                error,
-                                format!(
-                                    "Unable to decompress Zlib chunk: {} of data stream: {}",
-                                    chunk_index, stream_name
-                                )
-                            );
-                            return Err(error);
-                        }
-                    }
+                    _ = crate::zlib_decompress!(
+                        compressed_data,
+                        &mut chunk,
+                        format!(
+                            "Unable to decompress Zlib chunk: {} of data stream: {}",
+                            chunk_index, stream_name
+                        )
+                    );
                 }
                 CompressionMethod::Deflate => {
-                    let mut deflate_context: DeflateContext = DeflateContext::new();
-                    match deflate_context.decompress(compressed_data, &mut chunk) {
-                        Ok(_) => {}
-                        Err(mut error) => {
-                            keramics_core::error_trace_add_frame!(
-                                error,
-                                format!(
-                                    "Unable to decompress Deflate chunk: {} of data stream: {}",
-                                    chunk_index, stream_name
-                                )
-                            );
-                            return Err(error);
-                        }
-                    }
+                    _ = crate::deflate_decompress!(
+                        compressed_data,
+                        &mut chunk,
+                        format!(
+                            "Unable to decompress Deflate chunk: {} of data stream: {}",
+                            chunk_index, stream_name
+                        )
+                    );
                 }
                 CompressionMethod::Stored => {
                     return Err(keramics_core::error_trace_new!(format!(
@@ -1661,35 +1635,35 @@ mod tests {
             let crc_32: u32 = crc32_context.finalize();
 
             archive.extend_from_slice(&[0x50, 0x4b, 0x03, 0x04]);
-            archive.extend_from_slice(&20u16.to_le_bytes());
-            archive.extend_from_slice(&0u16.to_le_bytes());
-            archive.extend_from_slice(&0u16.to_le_bytes());
-            archive.extend_from_slice(&0u16.to_le_bytes());
-            archive.extend_from_slice(&0u16.to_le_bytes());
+            archive.extend_from_slice(&20_u16.to_le_bytes());
+            archive.extend_from_slice(&0_u16.to_le_bytes());
+            archive.extend_from_slice(&0_u16.to_le_bytes());
+            archive.extend_from_slice(&0_u16.to_le_bytes());
+            archive.extend_from_slice(&0_u16.to_le_bytes());
             archive.extend_from_slice(&crc_32.to_le_bytes());
             archive.extend_from_slice(&(data.len() as u32).to_le_bytes());
             archive.extend_from_slice(&(data.len() as u32).to_le_bytes());
             archive.extend_from_slice(&(file_name_bytes.len() as u16).to_le_bytes());
-            archive.extend_from_slice(&0u16.to_le_bytes());
+            archive.extend_from_slice(&0_u16.to_le_bytes());
             archive.extend_from_slice(file_name_bytes);
             archive.extend_from_slice(data);
 
             central_directory.extend_from_slice(&[0x50, 0x4b, 0x01, 0x02]);
-            central_directory.extend_from_slice(&20u16.to_le_bytes());
-            central_directory.extend_from_slice(&20u16.to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&20_u16.to_le_bytes());
+            central_directory.extend_from_slice(&20_u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
             central_directory.extend_from_slice(&crc_32.to_le_bytes());
             central_directory.extend_from_slice(&(data.len() as u32).to_le_bytes());
             central_directory.extend_from_slice(&(data.len() as u32).to_le_bytes());
             central_directory.extend_from_slice(&(file_name_bytes.len() as u16).to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
-            central_directory.extend_from_slice(&0u32.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u32.to_le_bytes());
             central_directory.extend_from_slice(&local_header_offset.to_le_bytes());
             central_directory.extend_from_slice(file_name_bytes);
         }
@@ -1698,13 +1672,13 @@ mod tests {
         archive.extend_from_slice(&central_directory);
 
         archive.extend_from_slice(&[0x50, 0x4b, 0x05, 0x06]);
-        archive.extend_from_slice(&0u16.to_le_bytes());
-        archive.extend_from_slice(&0u16.to_le_bytes());
+        archive.extend_from_slice(&0_u16.to_le_bytes());
+        archive.extend_from_slice(&0_u16.to_le_bytes());
         archive.extend_from_slice(&(entries.len() as u16).to_le_bytes());
         archive.extend_from_slice(&(entries.len() as u16).to_le_bytes());
         archive.extend_from_slice(&central_directory_size.to_le_bytes());
         archive.extend_from_slice(&central_directory_offset.to_le_bytes());
-        archive.extend_from_slice(&0u16.to_le_bytes());
+        archive.extend_from_slice(&0_u16.to_le_bytes());
 
         archive
     }
@@ -2293,7 +2267,7 @@ mod tests {
         }
 
         // Test out-of-bounds bevy offset for both uncompressed and compressed chunk paths.
-        for stored_size in [16u32, 4u32] {
+        for stored_size in [16_u32, 4_u32] {
             let bevy_index: Vec<u8> = build_bevy_index(&[(100, stored_size)]);
             let turtle: &str = concat!(
                 "@prefix : <aff4://vol> .\n",
@@ -2320,7 +2294,6 @@ mod tests {
 
         // Test missing stream/segment/chunk errors directly on Aff4StandardReader.
         let empty_media: Aff4StandardMedia = Aff4StandardMedia {
-            volumes: Vec::new(),
             streams: Vec::new(),
             map: None,
             media_size: 16,

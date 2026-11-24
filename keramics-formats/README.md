@@ -6,6 +6,8 @@ Data formats for Keramics.
 
 Supported data formats:
 
+* [Advanced Forensic Format (AFF)](https://github.com/keramics/keramics/tree/main/keramics-formats/src/aff/README.md)
+* [Advanced Forensic Format 4 (AFF4)](https://github.com/keramics/keramics/tree/main/keramics-formats/src/aff4/README.md)
 * [Apple File System (APFS)](https://github.com/keramics/keramics/tree/main/keramics-formats/src/apfs/README.md)
 * [Apple File System Compression (decmpfs)](https://github.com/keramics/keramics/tree/main/keramics-formats/src/decmpfs/README.md)
 * [Apple Partition Map (APM)](https://github.com/keramics/keramics/tree/main/keramics-formats/src/apm/README.md)
@@ -38,6 +40,7 @@ Supported data formats:
 * [VMWare Virtual Disk Format (VMDK)](https://github.com/keramics/keramics/tree/main/keramics-formats/src/vmdk/README.md)
 * [Volume Shadow Snapshot (volsnap)](https://github.com/keramics/keramics/tree/main/keramics-formats/src/volsnap/README.md)
 * [X File System (XFS)](https://github.com/keramics/keramics/tree/main/keramics-formats/src/xfs/README.md)
+* [ZIP archive format](https://github.com/keramics/keramics/tree/main/keramics-formats/src/zip/README.md)
 
 ## License
 

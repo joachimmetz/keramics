@@ -228,7 +228,15 @@ fn test_keramicsinfo_volume_systems_and_archives() {
 
 #[test]
 fn test_keramicsinfo_storage_media_images() {
-    let cases: [(&[&str], &str); 21] = [
+    let cases: [(&[&str], &str); 23] = [
+        (
+            &["--format", "aff", "../test_data/aff/ext2.AFF"],
+            "Advanced Forensic Format (AFF) information:",
+        ),
+        (
+            &["--format", "aff4", "../test_data/aff4/ext2.aff4"],
+            "Advanced Forensic Format 4 (AFF4) information:",
+        ),
         (
             &["--format", "ewf", "../test_data/ewf/ext2.E01"],
             "Expert Witness Compression Format (EWF) information:",

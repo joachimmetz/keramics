@@ -37,7 +37,6 @@ then
 
     # Create a split AFF4 container, with chunked (BEVY) based image storage, from an
     # incompressible 12 MiB source.
-    # Note that keramics does not support split AFF4 containers, nor BEVY based image storage.
     SPLIT_SOURCE_IMAGE_FILE="/tmp/keramics_aff4_split.raw"
     dd if=/dev/urandom of="${SPLIT_SOURCE_IMAGE_FILE}" bs=1M count=12 2> /dev/null
     aff4imager -t --relative -i "${SPLIT_SOURCE_IMAGE_FILE}" -o "${PWD}/test_data/aff4/split.aff4" -s 4M

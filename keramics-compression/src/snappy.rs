@@ -1901,7 +1901,7 @@ mod tests {
                 .into_iter()
                 .chain(b"abcd".to_vec())
                 .collect(),
-            "copy2_mid" => (0u8..200)
+            "copy2_mid" => (0_u8..200)
                 .map(|i| ((i as u16 * 7 + 3) % 251) as u8)
                 .collect::<Vec<u8>>()
                 .into_iter()
@@ -1914,12 +1914,12 @@ mod tests {
                 result.extend_from_slice(&base[10..46]);
                 result
             }
-            "long_literal" => (0..700u32)
+            "long_literal" => (0..700_u32)
                 .map(|i| (((i as u64 * 2654435761) >> 13) as u8) ^ ((i * 40503) as u8))
                 .collect(),
             "mixed_block" => {
                 let mut result: Vec<u8> = Vec::new();
-                for i in 0..4096u32 {
+                for i in 0..4096_u32 {
                     result.push((i % 251) as u8);
                     result.push(((i / 7) % 256) as u8);
                     if i % 97 == 0 {
@@ -1966,7 +1966,7 @@ mod tests {
         assert_eq!(&uncompressed_data[..64], CHUNK0_FIRST);
 
         let sum: u64 = uncompressed_data.iter().map(|b| *b as u64).sum();
-        let xor_value: u8 = uncompressed_data.iter().fold(0u8, |a, b| a ^ b);
+        let xor_value: u8 = uncompressed_data.iter().fold(0_u8, |a, b| a ^ b);
         assert_eq!(sum, CHUNK0_SUM);
         assert_eq!(xor_value, CHUNK0_XOR);
 

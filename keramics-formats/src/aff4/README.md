@@ -7,17 +7,16 @@ Supported features:
 
 | Category | Feature(s) |
 | --- | --- |
-| Format version | 1 |
-| Format variants | Zip (ZIP64) volume (.AFF4) |
-| Images | multiple per volume |
-| Compression | stored, deflate |
+| Format version | 1 (legacy and AFF4 Standard v1.0a) |
+| Format variants | Zip (ZIP64) volume (.AFF4), split volume (.A01..A32) |
+| Images | multiple per volume, Map, ImageStream (BEVY), symbolic streams |
+| Compression | stored, deflate, zlib, Snappy |
 
 Unsupported features:
 
 | Category | Feature(s) |
 | --- | --- |
 | Format version | 2 |
-| Format variants | Directory volume, split volume |
-| Images | Map, ImageStream (BEVY) |
-| Compression | LZ4, Snappy |
-| | Block hashes, symbolic streams |
+| Format variants | Directory volume |
+| Compression | LZ4 |
+| | Block hashes |

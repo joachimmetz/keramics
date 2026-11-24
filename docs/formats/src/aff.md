@@ -501,5 +501,9 @@ concept used by the AFF format:
 
 ## References
 
+<!-- rumdl-disable MD013 -->
+
 * [Advanced Forensic Format: an open, extensible format for disk imaging](https://cs.harvard.edu/malan/publications/aff.pdf),
   by S. Garfinkel, D. Malan, K. Dubec, C. Stevens and C. Pham
+
+<!-- rumdl-enable MD013 -->

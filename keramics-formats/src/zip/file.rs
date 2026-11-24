@@ -433,36 +433,36 @@ mod tests {
 
             // Local file header (30 bytes + file name).
             archive.extend_from_slice(ZIP_LOCAL_FILE_HEADER_SIGNATURE);
-            archive.extend_from_slice(&20u16.to_le_bytes());
+            archive.extend_from_slice(&20_u16.to_le_bytes());
             archive.extend_from_slice(&flags.to_le_bytes());
             archive.extend_from_slice(&compression_method.to_le_bytes());
-            archive.extend_from_slice(&0u16.to_le_bytes());
-            archive.extend_from_slice(&0u16.to_le_bytes());
+            archive.extend_from_slice(&0_u16.to_le_bytes());
+            archive.extend_from_slice(&0_u16.to_le_bytes());
             archive.extend_from_slice(&crc_32.to_le_bytes());
             archive.extend_from_slice(&(data.len() as u32).to_le_bytes());
             archive.extend_from_slice(&uncompressed_size.to_le_bytes());
             archive.extend_from_slice(&(file_name.len() as u16).to_le_bytes());
-            archive.extend_from_slice(&0u16.to_le_bytes());
+            archive.extend_from_slice(&0_u16.to_le_bytes());
             archive.extend_from_slice(file_name);
             archive.extend_from_slice(data);
 
             // Central directory header (46 bytes + file name).
             central_directory.extend_from_slice(ZIP_CENTRAL_DIRECTORY_HEADER_SIGNATURE);
-            central_directory.extend_from_slice(&20u16.to_le_bytes());
-            central_directory.extend_from_slice(&20u16.to_le_bytes());
+            central_directory.extend_from_slice(&20_u16.to_le_bytes());
+            central_directory.extend_from_slice(&20_u16.to_le_bytes());
             central_directory.extend_from_slice(&flags.to_le_bytes());
             central_directory.extend_from_slice(&compression_method.to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
             central_directory.extend_from_slice(&crc_32.to_le_bytes());
             central_directory.extend_from_slice(&(data.len() as u32).to_le_bytes());
             central_directory.extend_from_slice(&uncompressed_size.to_le_bytes());
             central_directory.extend_from_slice(&(file_name.len() as u16).to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
-            central_directory.extend_from_slice(&0u16.to_le_bytes());
-            central_directory.extend_from_slice(&0u32.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u16.to_le_bytes());
+            central_directory.extend_from_slice(&0_u32.to_le_bytes());
             central_directory.extend_from_slice(&local_header_offset.to_le_bytes());
             central_directory.extend_from_slice(file_name);
         }
@@ -475,11 +475,11 @@ mod tests {
 
             // Zip64 end of central directory record (56 bytes).
             archive.extend_from_slice(ZIP64_END_OF_CENTRAL_DIRECTORY_RECORD_SIGNATURE);
-            archive.extend_from_slice(&44u64.to_le_bytes());
-            archive.extend_from_slice(&45u16.to_le_bytes());
-            archive.extend_from_slice(&45u16.to_le_bytes());
-            archive.extend_from_slice(&0u32.to_le_bytes());
-            archive.extend_from_slice(&0u32.to_le_bytes());
+            archive.extend_from_slice(&44_u64.to_le_bytes());
+            archive.extend_from_slice(&45_u16.to_le_bytes());
+            archive.extend_from_slice(&45_u16.to_le_bytes());
+            archive.extend_from_slice(&0_u32.to_le_bytes());
+            archive.extend_from_slice(&0_u32.to_le_bytes());
             archive.extend_from_slice(&(entries.len() as u64).to_le_bytes());
             archive.extend_from_slice(&(entries.len() as u64).to_le_bytes());
             archive.extend_from_slice(&central_directory_size.to_le_bytes());
@@ -487,14 +487,14 @@ mod tests {
 
             // Zip64 end of central directory locator (20 bytes).
             archive.extend_from_slice(ZIP64_END_OF_CENTRAL_DIRECTORY_LOCATOR_SIGNATURE);
-            archive.extend_from_slice(&0u32.to_le_bytes());
+            archive.extend_from_slice(&0_u32.to_le_bytes());
             archive.extend_from_slice(&eocd64_offset.to_le_bytes());
-            archive.extend_from_slice(&1u32.to_le_bytes());
+            archive.extend_from_slice(&1_u32.to_le_bytes());
         }
         // End of central directory record (22 bytes + comment).
         archive.extend_from_slice(ZIP_END_OF_CENTRAL_DIRECTORY_RECORD_SIGNATURE);
-        archive.extend_from_slice(&0u16.to_le_bytes());
-        archive.extend_from_slice(&0u16.to_le_bytes());
+        archive.extend_from_slice(&0_u16.to_le_bytes());
+        archive.extend_from_slice(&0_u16.to_le_bytes());
         if use_zip64 {
             archive.extend_from_slice(&0xffffu16.to_le_bytes());
             archive.extend_from_slice(&0xffffu16.to_le_bytes());
@@ -648,7 +648,7 @@ mod tests {
     fn test_read_data_stream_with_central_directory_out_of_bounds() {
         let mut archive: Vec<u8> = build_test_zip(&[], b"", false);
         // Set central_directory_size to 1024 so offset + size exceeds file_size.
-        archive[12..16].copy_from_slice(&1024u32.to_le_bytes());
+        archive[12..16].copy_from_slice(&1024_u32.to_le_bytes());
 
         let mut file: ZipFile = ZipFile::new();
         let data_stream: DataStreamReference = open_fake_data_stream(&archive);
@@ -756,13 +756,13 @@ mod tests {
         // EOCD at offset 0 with Zip64 sentinel values leaves < 20 bytes before it.
         let mut eocd: Vec<u8> = Vec::new();
         eocd.extend_from_slice(ZIP_END_OF_CENTRAL_DIRECTORY_RECORD_SIGNATURE);
-        eocd.extend_from_slice(&0u16.to_le_bytes());
-        eocd.extend_from_slice(&0u16.to_le_bytes());
+        eocd.extend_from_slice(&0_u16.to_le_bytes());
+        eocd.extend_from_slice(&0_u16.to_le_bytes());
         eocd.extend_from_slice(&0xffffu16.to_le_bytes());
         eocd.extend_from_slice(&0xffffu16.to_le_bytes());
         eocd.extend_from_slice(&0xffffffffu32.to_le_bytes());
         eocd.extend_from_slice(&0xffffffffu32.to_le_bytes());
-        eocd.extend_from_slice(&0u16.to_le_bytes());
+        eocd.extend_from_slice(&0_u16.to_le_bytes());
 
         let mut file: ZipFile = ZipFile::new();
         let data_stream: DataStreamReference = open_fake_data_stream(&eocd);
@@ -791,7 +791,7 @@ mod tests {
         let locator_offset: usize = archive.len() - 22 - 20;
         // Point eocd64_offset past file_size.
         archive[(locator_offset + 8)..(locator_offset + 16)]
-            .copy_from_slice(&999999u64.to_le_bytes());
+            .copy_from_slice(&999999_u64.to_le_bytes());
 
         let mut file: ZipFile = ZipFile::new();
         let data_stream: DataStreamReference = open_fake_data_stream(&archive);
@@ -900,7 +900,7 @@ mod tests {
             false,
         );
         // Alter the local file header file_name_length field (bytes 26..28).
-        archive[26..28].copy_from_slice(&1u16.to_le_bytes());
+        archive[26..28].copy_from_slice(&1_u16.to_le_bytes());
 
         let mut file: ZipFile = ZipFile::new();
         let data_stream: DataStreamReference = open_fake_data_stream(&archive);
