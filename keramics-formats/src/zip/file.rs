@@ -277,25 +277,9 @@ impl ZipFile {
                 }
             }
             let file_name_length: usize = entry.file_name_length as usize;
+            entry.file_name =
+                Self::read_entry_file_name(data_stream, entry_offset + 46, file_name_length)?;
 
-            if file_name_length != 0 {
-                let mut file_name_data: Vec<u8> = vec![0; file_name_length];
-
-                keramics_core::data_stream_read_exact_at_position!(
-                    data_stream,
-                    &mut file_name_data,
-                    SeekFrom::Start(entry_offset + 46)
-                );
-                entry.file_name = match String::from_utf8(file_name_data) {
-                    Ok(string) => string,
-                    Err(error) => {
-                        return Err(keramics_core::error_trace_new!(format!(
-                            "Unsupported encoding of entry file name with error: {}",
-                            error
-                        )));
-                    }
-                };
-            }
             let entry_length: u64 = 46
                 + (entry.file_name_length as u64)
                 + (entry.extra_field_length as u64)
@@ -304,6 +288,31 @@ impl ZipFile {
             entry_offset += entry_length;
         }
         Ok(())
+    }
+
+    /// Reads an entry's UTF-8 file name at the specified offset.
+    fn read_entry_file_name(
+        data_stream: &DataStreamReference,
+        offset: u64,
+        file_name_length: usize,
+    ) -> Result<String, ErrorTrace> {
+        if file_name_length == 0 {
+            return Ok(String::new());
+        }
+        let mut file_name_data: Vec<u8> = vec![0; file_name_length];
+
+        keramics_core::data_stream_read_exact_at_position!(
+            data_stream,
+            &mut file_name_data,
+            SeekFrom::Start(offset)
+        );
+        match String::from_utf8(file_name_data) {
+            Ok(string) => Ok(string),
+            Err(error) => Err(keramics_core::error_trace_new!(format!(
+                "Unsupported encoding of entry file name with error: {}",
+                error
+            ))),
+        }
     }
 
     /// Reads the data of a stored (not compressed) or deflate compressed entry.

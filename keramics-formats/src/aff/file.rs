@@ -243,6 +243,41 @@ impl AffFile {
         Ok(())
     }
 
+    /// Reads the optional bad sector flag pattern from the segments.
+    fn read_bad_flag(
+        data_stream: &DataStreamReference,
+        segments: &HashMap<String, AffSegment>,
+    ) -> Result<Vec<u8>, ErrorTrace> {
+        let Some(segment) = segments.get("badflag") else {
+            return Ok(Vec::new());
+        };
+        match read_segment_data(data_stream, segment) {
+            Ok(data) => Ok(data),
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, "Unable to read badflag data");
+                Err(error)
+            }
+        }
+    }
+
+    /// Reads the sector size from the segments or returns the default.
+    fn read_bytes_per_sector(
+        data_stream: &DataStreamReference,
+        segments: &HashMap<String, AffSegment>,
+    ) -> Result<u32, ErrorTrace> {
+        let Some(segment) = segments.get("sectorsize") else {
+            return Ok(AFF_DEFAULT_BYTES_PER_SECTOR);
+        };
+        match Self::read_size_segment_value(
+            data_stream,
+            segment,
+            "Unable to read sectorsize value",
+        )? {
+            Some(value) => Ok(value as u32),
+            None => Ok(AFF_DEFAULT_BYTES_PER_SECTOR),
+        }
+    }
+
     /// Reads the segments of the AFF file.
     pub fn read_data_stream(
         &mut self,
@@ -274,171 +309,23 @@ impl AffFile {
                 "Invalid AFF file header signature"
             ));
         }
-
-        let mut segments: HashMap<String, AffSegment> = HashMap::new();
-        let mut current_offset: u64 = AFF_FILE_SIGNATURE_SIZE;
-
-        while current_offset < size {
-            let mut segment_header: AffSegmentHeader = AffSegmentHeader::new();
-            match segment_header.read_at_position(data_stream, SeekFrom::Start(current_offset)) {
-                Ok(_) => {}
-                Err(mut error) => {
-                    keramics_core::error_trace_add_frame!(
-                        error,
-                        format!(
-                            "Unable to read segment header at offset: {} (0x{:08x})",
-                            current_offset, current_offset
-                        )
-                    );
-                    return Err(error);
-                }
-            }
-            let name_length: u32 = segment_header.name_length;
-            let data_length: u32 = segment_header.data_length;
-            let flag: u32 = segment_header.flag;
-
-            if name_length > AFF_MAXIMUM_SEGMENT_NAME_SIZE {
-                return Err(keramics_core::error_trace_new!(format!(
-                    "Segment name size: {} is larger than the maximum size: {} at offset: {} (0x{:08x})",
-                    name_length, AFF_MAXIMUM_SEGMENT_NAME_SIZE, current_offset, current_offset
-                )));
-            }
-            let name_offset: u64 = current_offset + AFF_SEGMENT_HEADER_SIZE;
-            let name: String = if name_length > 0 {
-                let mut name_data: Vec<u8> = vec![0; name_length as usize];
-                keramics_core::data_stream_read_exact_at_position!(
-                    data_stream.clone(),
-                    &mut name_data,
-                    SeekFrom::Start(name_offset)
-                );
-                match String::from_utf8(name_data) {
-                    Ok(name) => name,
-                    Err(_) => {
-                        return Err(keramics_core::error_trace_new!(format!(
-                            "Segment name is not valid UTF-8 at offset: {} (0x{:08x})",
-                            name_offset, name_offset
-                        )));
-                    }
-                }
-            } else {
-                // A segment with an empty name is an ignored segment.
-                String::new()
-            };
-            let data_offset: u64 = name_offset + name_length as u64;
-            let tail_offset: u64 = data_offset + data_length as u64;
-
-            let mut segment_tail: AffSegmentTail = AffSegmentTail::new();
-            match segment_tail.read_at_position(data_stream, SeekFrom::Start(tail_offset)) {
-                Ok(_) => {}
-                Err(mut error) => {
-                    keramics_core::error_trace_add_frame!(
-                        error,
-                        format!(
-                            "Unable to read segment tail of segment: {} at offset: {} (0x{:08x})",
-                            name, tail_offset, tail_offset
-                        )
-                    );
-                    return Err(error);
-                }
-            }
-            let segment_size: u32 = segment_tail.segment_size;
-            let computed_size: u64 = AFF_SEGMENT_HEADER_SIZE
-                + name_length as u64
-                + data_length as u64
-                + AFF_SEGMENT_TAIL_SIZE;
-            if segment_size as u64 != computed_size {
-                return Err(keramics_core::error_trace_new!(format!(
-                    "Mismatched segment size: {} (0x{:08x}) expected: {} (0x{:08x}) of segment: {}",
-                    segment_size, segment_size, computed_size, computed_size, name
-                )));
-            }
-            segments.insert(
-                name.clone(),
-                AffSegment::new(name, flag, data_offset, data_length),
-            );
-            current_offset += computed_size;
-        }
+        let segments: HashMap<String, AffSegment> = Self::read_segments(data_stream, size)?;
 
         // The order of the segments within an AFF file is not specified; pageN names contain the zero-based page number.
-        let mut number_of_pages: usize = 0;
-        for (segment_name, _) in segments.iter() {
-            if get_page_index(segment_name).is_some() {
-                number_of_pages += 1;
-            }
-        }
-        let page_size: u64 = match segments.get("pagesize") {
-            // The "segsize" name is the deprecated name for "pagesize".
-            Some(segment) if segment.get_flag() != 0 => segment.get_flag() as u64,
-            Some(segment) if segment.get_data_length() >= 4 => {
-                match read_value_64bit(data_stream, segment) {
-                    Ok(value) => value,
-                    Err(mut error) => {
-                        keramics_core::error_trace_add_frame!(
-                            error,
-                            "Unable to read pagesize value"
-                        );
-                        return Err(error);
-                    }
-                }
-            }
-            _ => match segments.get("segsize") {
-                Some(segment) if segment.get_flag() != 0 => segment.get_flag() as u64,
-                Some(segment) if segment.get_data_length() >= 4 => {
-                    match read_value_64bit(data_stream, segment) {
-                        Ok(value) => value,
-                        Err(mut error) => {
-                            keramics_core::error_trace_add_frame!(
-                                error,
-                                "Unable to read segsize value"
-                            );
-                            return Err(error);
-                        }
-                    }
-                }
-                _ => AFF_DEFAULT_PAGE_SIZE,
-            },
-        };
-        let bytes_per_sector: u32 = match segments.get("sectorsize") {
-            Some(segment) if segment.get_flag() != 0 => segment.get_flag(),
-            Some(segment) if segment.get_data_length() >= 4 => {
-                match read_value_64bit(data_stream, segment) {
-                    Ok(value) => value as u32,
-                    Err(mut error) => {
-                        keramics_core::error_trace_add_frame!(
-                            error,
-                            "Unable to read sectorsize value"
-                        );
-                        return Err(error);
-                    }
-                }
-            }
-            _ => AFF_DEFAULT_BYTES_PER_SECTOR,
-        };
-        let media_size: u64 = match segments.get("imagesize") {
-            Some(segment) => match read_value_64bit(data_stream, segment) {
-                Ok(value) => value,
-                Err(mut error) => {
-                    keramics_core::error_trace_add_frame!(error, "Unable to read imagesize value");
-                    return Err(error);
-                }
-            },
-            // When the image size is not stored, derive it from the stored pages.
-            None => number_of_pages as u64 * page_size,
-        };
+        let number_of_pages: usize = segments
+            .keys()
+            .filter(|segment_name| get_page_index(segment_name).is_some())
+            .count();
+        let page_size: u64 = Self::read_page_size(data_stream, &segments)?;
+        let bytes_per_sector: u32 = Self::read_bytes_per_sector(data_stream, &segments)?;
+        let media_size: u64 =
+            Self::read_media_size(data_stream, &segments, number_of_pages, page_size)?;
         let number_of_bad_sectors: u64 = match segments.get("badsectors") {
             Some(segment) => read_value_64bit(data_stream, segment).unwrap_or_default(),
             None => 0,
         };
-        let bad_flag: Vec<u8> = match segments.get("badflag") {
-            Some(segment) => match read_segment_data(data_stream, segment) {
-                Ok(data) => data,
-                Err(mut error) => {
-                    keramics_core::error_trace_add_frame!(error, "Unable to read badflag data");
-                    return Err(error);
-                }
-            },
-            None => Vec::new(),
-        };
+        let bad_flag: Vec<u8> = Self::read_bad_flag(data_stream, &segments)?;
+
         self.segments = segments;
         self.media_size = media_size;
         self.bytes_per_sector = bytes_per_sector;
@@ -448,6 +335,179 @@ impl AffFile {
         self.bad_flag = bad_flag;
 
         Ok(())
+    }
+
+    /// Reads the media size from the `imagesize` segment or derives it from the stored pages.
+    fn read_media_size(
+        data_stream: &DataStreamReference,
+        segments: &HashMap<String, AffSegment>,
+        number_of_pages: usize,
+        page_size: u64,
+    ) -> Result<u64, ErrorTrace> {
+        let Some(segment) = segments.get("imagesize") else {
+            // When the image size is not stored, derive it from the stored pages.
+            return Ok(number_of_pages as u64 * page_size);
+        };
+        match read_value_64bit(data_stream, segment) {
+            Ok(value) => Ok(value),
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, "Unable to read imagesize value");
+                Err(error)
+            }
+        }
+    }
+
+    /// Reads the page size from `pagesize` or deprecated `segsize`, or returns the default.
+    fn read_page_size(
+        data_stream: &DataStreamReference,
+        segments: &HashMap<String, AffSegment>,
+    ) -> Result<u64, ErrorTrace> {
+        if let Some(segment) = segments.get("pagesize")
+            && let Some(value) = Self::read_size_segment_value(
+                data_stream,
+                segment,
+                "Unable to read pagesize value",
+            )?
+        {
+            return Ok(value);
+        }
+        // The "segsize" name is the deprecated name for "pagesize".
+        if let Some(segment) = segments.get("segsize")
+            && let Some(value) =
+                Self::read_size_segment_value(data_stream, segment, "Unable to read segsize value")?
+        {
+            return Ok(value);
+        }
+        Ok(AFF_DEFAULT_PAGE_SIZE)
+    }
+
+    /// Reads a single segment (header, name, and tail) at the specified offset.
+    fn read_segment_at_offset(
+        data_stream: &DataStreamReference,
+        current_offset: u64,
+    ) -> Result<(AffSegment, u64), ErrorTrace> {
+        let mut segment_header: AffSegmentHeader = AffSegmentHeader::new();
+        match segment_header.read_at_position(data_stream, SeekFrom::Start(current_offset)) {
+            Ok(_) => {}
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(
+                    error,
+                    format!(
+                        "Unable to read segment header at offset: {} (0x{:08x})",
+                        current_offset, current_offset
+                    )
+                );
+                return Err(error);
+            }
+        }
+        let name_length: u32 = segment_header.name_length;
+        let data_length: u32 = segment_header.data_length;
+        let flag: u32 = segment_header.flag;
+
+        if name_length > AFF_MAXIMUM_SEGMENT_NAME_SIZE {
+            return Err(keramics_core::error_trace_new!(format!(
+                "Segment name size: {} is larger than the maximum size: {} at offset: {} (0x{:08x})",
+                name_length, AFF_MAXIMUM_SEGMENT_NAME_SIZE, current_offset, current_offset
+            )));
+        }
+        let name_offset: u64 = current_offset + AFF_SEGMENT_HEADER_SIZE;
+        let name: String = Self::read_segment_name(data_stream, name_offset, name_length)?;
+
+        let data_offset: u64 = name_offset + name_length as u64;
+        let tail_offset: u64 = data_offset + data_length as u64;
+
+        let mut segment_tail: AffSegmentTail = AffSegmentTail::new();
+        match segment_tail.read_at_position(data_stream, SeekFrom::Start(tail_offset)) {
+            Ok(_) => {}
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(
+                    error,
+                    format!(
+                        "Unable to read segment tail of segment: {} at offset: {} (0x{:08x})",
+                        name, tail_offset, tail_offset
+                    )
+                );
+                return Err(error);
+            }
+        }
+        let segment_size: u32 = segment_tail.segment_size;
+        let computed_size: u64 = AFF_SEGMENT_HEADER_SIZE
+            + name_length as u64
+            + data_length as u64
+            + AFF_SEGMENT_TAIL_SIZE;
+        if segment_size as u64 != computed_size {
+            return Err(keramics_core::error_trace_new!(format!(
+                "Mismatched segment size: {} (0x{:08x}) expected: {} (0x{:08x}) of segment: {}",
+                segment_size, segment_size, computed_size, computed_size, name
+            )));
+        }
+        Ok((
+            AffSegment::new(name, flag, data_offset, data_length),
+            computed_size,
+        ))
+    }
+
+    /// Reads a UTF-8 segment name of the specified length.
+    fn read_segment_name(
+        data_stream: &DataStreamReference,
+        name_offset: u64,
+        name_length: u32,
+    ) -> Result<String, ErrorTrace> {
+        if name_length == 0 {
+            // A segment with an empty name is an ignored segment.
+            return Ok(String::new());
+        }
+        let mut name_data: Vec<u8> = vec![0; name_length as usize];
+        keramics_core::data_stream_read_exact_at_position!(
+            data_stream.clone(),
+            &mut name_data,
+            SeekFrom::Start(name_offset)
+        );
+        match String::from_utf8(name_data) {
+            Ok(name) => Ok(name),
+            Err(_) => Err(keramics_core::error_trace_new!(format!(
+                "Segment name is not valid UTF-8 at offset: {} (0x{:08x})",
+                name_offset, name_offset
+            ))),
+        }
+    }
+
+    /// Reads all segments in the AFF file starting after the file signature.
+    fn read_segments(
+        data_stream: &DataStreamReference,
+        size: u64,
+    ) -> Result<HashMap<String, AffSegment>, ErrorTrace> {
+        let mut segments: HashMap<String, AffSegment> = HashMap::new();
+        let mut current_offset: u64 = AFF_FILE_SIGNATURE_SIZE;
+
+        while current_offset < size {
+            let (segment, computed_size): (AffSegment, u64) =
+                Self::read_segment_at_offset(data_stream, current_offset)?;
+            segments.insert(segment.get_name().to_string(), segment);
+            current_offset += computed_size;
+        }
+        Ok(segments)
+    }
+
+    /// Reads a numeric size value stored in a segment's flag field or 64-bit data payload.
+    fn read_size_segment_value(
+        data_stream: &DataStreamReference,
+        segment: &AffSegment,
+        error_message: &str,
+    ) -> Result<Option<u64>, ErrorTrace> {
+        if segment.get_flag() != 0 {
+            return Ok(Some(segment.get_flag() as u64));
+        }
+        if segment.get_data_length() < 4 {
+            return Ok(None);
+        }
+        match read_value_64bit(data_stream, segment) {
+            Ok(value) => Ok(Some(value)),
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, error_message);
+                Err(error)
+            }
+        }
     }
 }
 

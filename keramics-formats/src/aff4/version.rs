@@ -45,6 +45,37 @@ impl Aff4Version {
         self.major == AFF4_SUPPORTED_MAJOR_VERSION
     }
 
+    /// Parses a single `name=value` line from `version.txt`.
+    fn parse_line(&mut self, line: &str) -> Result<(), ErrorTrace> {
+        let (name, value): (&str, &str) = match line.split_once('=') {
+            Some((name, value)) => (name.trim(), value.trim()),
+            None => {
+                return Err(keramics_core::error_trace_new!(format!(
+                    "Unsupported version data line: {}",
+                    line
+                )));
+            }
+        };
+        match name {
+            "major" => self.major = Self::parse_version_number(value, "major")?,
+            "minor" => self.minor = Self::parse_version_number(value, "minor")?,
+            "tool" => self.tool = value.to_string(),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Parses a u16 version component value.
+    fn parse_version_number(value: &str, label: &str) -> Result<u16, ErrorTrace> {
+        match value.parse::<u16>() {
+            Ok(number) => Ok(number),
+            Err(error) => Err(keramics_core::error_trace_new!(format!(
+                "Unsupported {} version value: {} with error: {}",
+                label, value, error
+            ))),
+        }
+    }
+
     /// Reads the image version from a buffer.
     pub fn read_data(&mut self, data: &[u8]) -> Result<(), ErrorTrace> {
         let content: String = match String::from_utf8(data.to_vec()) {
@@ -62,41 +93,7 @@ impl Aff4Version {
             if line.is_empty() {
                 continue;
             }
-            let (name, value): (&str, &str) = match line.split_once('=') {
-                Some((name, value)) => (name.trim(), value.trim()),
-                None => {
-                    return Err(keramics_core::error_trace_new!(format!(
-                        "Unsupported version data line: {}",
-                        line
-                    )));
-                }
-            };
-            match name {
-                "major" => {
-                    self.major = match value.parse::<u16>() {
-                        Ok(major) => major,
-                        Err(error) => {
-                            return Err(keramics_core::error_trace_new!(format!(
-                                "Unsupported major version value: {} with error: {}",
-                                value, error
-                            )));
-                        }
-                    }
-                }
-                "minor" => {
-                    self.minor = match value.parse::<u16>() {
-                        Ok(minor) => minor,
-                        Err(error) => {
-                            return Err(keramics_core::error_trace_new!(format!(
-                                "Unsupported minor version value: {} with error: {}",
-                                value, error
-                            )));
-                        }
-                    }
-                }
-                "tool" => self.tool = value.to_string(),
-                _ => {}
-            }
+            self.parse_line(line)?;
         }
         Ok(())
     }

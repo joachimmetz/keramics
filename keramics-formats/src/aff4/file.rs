@@ -137,42 +137,8 @@ impl Aff4File {
         Ok(())
     }
 
-    /// Reads the AFF4 file.
-    pub fn read_data_stream(
-        &mut self,
-        data_stream: &DataStreamReference,
-    ) -> Result<(), ErrorTrace> {
-        match self.zip_file.read_data_stream(data_stream) {
-            Ok(_) => {}
-            Err(mut error) => {
-                keramics_core::error_trace_add_frame!(error, "Unable to read Zip file");
-                return Err(error);
-            }
-        }
-        let version_data: Vec<u8> = match self.read_entry_data(AFF4_VERSION_FILE_NAME) {
-            Ok(data) => data,
-            Err(mut error) => {
-                keramics_core::error_trace_add_frame!(error, "Unable to read version entry data");
-                return Err(error);
-            }
-        };
-        let mut version: Aff4Version = Aff4Version::new();
-
-        match version.read_data(&version_data) {
-            Ok(_) => {}
-            Err(mut error) => {
-                keramics_core::error_trace_add_frame!(error, "Unable to read version data");
-                return Err(error);
-            }
-        }
-        if !version.is_supported() {
-            return Err(keramics_core::error_trace_new!(format!(
-                "Unsupported AFF4 version: major={} minor={}",
-                version.major, version.minor
-            )));
-        }
-        self.version = version;
-
+    /// Reads the container description entry from the volume.
+    fn read_container_description(&mut self) -> Result<String, ErrorTrace> {
         let description_data: Vec<u8> =
             match self.read_entry_data(AFF4_CONTAINER_DESCRIPTION_FILE_NAME) {
                 Ok(data) => data,
@@ -193,8 +159,38 @@ impl Aff4File {
                 )));
             }
         };
-        self.container_description = description.trim().to_string();
+        Ok(description.trim().to_string())
+    }
 
+    /// Reads the AFF4 file.
+    pub fn read_data_stream(
+        &mut self,
+        data_stream: &DataStreamReference,
+    ) -> Result<(), ErrorTrace> {
+        match self.zip_file.read_data_stream(data_stream) {
+            Ok(_) => {}
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, "Unable to read Zip file");
+                return Err(error);
+            }
+        }
+        self.version = self.read_version()?;
+        self.container_description = self.read_container_description()?;
+
+        let information: Aff4Information = self.read_information()?;
+        let is_standard: bool = information.is_standard();
+        let image_names: Vec<String> = self.resolve_image_names(&information, is_standard)?;
+
+        self.volume_uri = information.volume_uri.clone();
+        self.image_names = image_names;
+        self.information = information;
+        self.is_standard = is_standard;
+
+        Ok(())
+    }
+
+    /// Reads and validates the `information.turtle` entry from the volume.
+    fn read_information(&mut self) -> Result<Aff4Information, ErrorTrace> {
         let information_data: Vec<u8> = match self.read_entry_data(AFF4_INFORMATION_FILE_NAME) {
             Ok(data) => data,
             Err(mut error) => {
@@ -219,38 +215,66 @@ impl Aff4File {
                 "Missing volume URI in information container"
             ));
         }
-        let is_standard: bool = information.is_standard();
+        Ok(information)
+    }
+
+    /// Reads and validates the `version.txt` entry from the volume.
+    fn read_version(&mut self) -> Result<Aff4Version, ErrorTrace> {
+        let version_data: Vec<u8> = match self.read_entry_data(AFF4_VERSION_FILE_NAME) {
+            Ok(data) => data,
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, "Unable to read version entry data");
+                return Err(error);
+            }
+        };
+        let mut version: Aff4Version = Aff4Version::new();
+
+        match version.read_data(&version_data) {
+            Ok(_) => {}
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, "Unable to read version data");
+                return Err(error);
+            }
+        }
+        if !version.is_supported() {
+            return Err(keramics_core::error_trace_new!(format!(
+                "Unsupported AFF4 version: major={} minor={}",
+                version.major, version.minor
+            )));
+        }
+        Ok(version)
+    }
+
+    /// Resolves legacy image entry names present in the Zip volume.
+    fn resolve_image_names(
+        &self,
+        information: &Aff4Information,
+        is_standard: bool,
+    ) -> Result<Vec<String>, ErrorTrace> {
         // Standard AFF4 volumes (for example AFF4 Standard v1.0a) store their
         // image as data stream and map nodes. The node identities are not Zip
         // entry names and are resolved from the data stream and map nodes,
         // therefore the image entry names are not validated here.
-        let image_names: Vec<String> = if is_standard {
-            Vec::new()
-        } else {
-            if information.image_names.is_empty() {
-                return Err(keramics_core::error_trace_new!(
-                    "Missing image entry in information container"
-                ));
-            }
-            let image_names: Vec<String> = information
-                .image_names
-                .iter()
-                .filter(|image_name| self.zip_file.get_entry(image_name).is_some())
-                .cloned()
-                .collect();
-            if image_names.is_empty() {
-                return Err(keramics_core::error_trace_new!(
-                    "Missing image entry in volume"
-                ));
-            }
-            image_names
-        };
-        self.volume_uri = information.volume_uri.clone();
-        self.image_names = image_names;
-        self.information = information;
-        self.is_standard = is_standard;
-
-        Ok(())
+        if is_standard {
+            return Ok(Vec::new());
+        }
+        if information.image_names.is_empty() {
+            return Err(keramics_core::error_trace_new!(
+                "Missing image entry in information container"
+            ));
+        }
+        let image_names: Vec<String> = information
+            .image_names
+            .iter()
+            .filter(|image_name| self.zip_file.get_entry(image_name).is_some())
+            .cloned()
+            .collect();
+        if image_names.is_empty() {
+            return Err(keramics_core::error_trace_new!(
+                "Missing image entry in volume"
+            ));
+        }
+        Ok(image_names)
     }
 
     /// Reads the data of an entry from the volume.

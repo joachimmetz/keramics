@@ -139,6 +139,28 @@ impl Aff4Information {
         }
     }
 
+    /// Derives legacy image entry names from volume-relative `Image` nodes.
+    fn extract_image_names(nodes: &[Aff4Node]) -> Vec<String> {
+        let mut image_names: Vec<String> = Vec::new();
+
+        // Derive the legacy image entry names from the `Image` typed nodes
+        // with a volume relative subject. Their leading slash is removed when
+        // stored as Zip entry names.
+        for node in nodes.iter() {
+            let is_image: bool = node.is_type("Image")
+                || node.is_type("DiskImage")
+                || node.is_type("ContiguousDiskImage");
+            if !is_image || node.has_iri_subject() || node.subject == ":" {
+                continue;
+            }
+            let name: String = node.subject.trim_start_matches('/').to_string();
+            if !name.is_empty() && !image_names.contains(&name) {
+                image_names.push(name);
+            }
+        }
+        image_names
+    }
+
     /// Retrieves the first IRI in the data.
     fn extract_iri(data: &str) -> Option<&str> {
         let start: usize = data.find('<')?;
@@ -171,88 +193,131 @@ impl Aff4Information {
         object.to_string()
     }
 
+    /// Parses a `@base` or `@prefix` directive line.
+    fn parse_directive(&mut self, line: &str) -> Result<(), ErrorTrace> {
+        if let Some(rest) = line.strip_prefix("@base") {
+            let base: &str = match Self::extract_iri(rest.trim()) {
+                Some(base) => base,
+                None => {
+                    return Err(keramics_core::error_trace_new!(format!(
+                        "Unsupported @base directive: {}",
+                        line
+                    )));
+                }
+            };
+            self.volume_uri = base.to_string();
+            return Ok(());
+        }
+        let Some(rest) = line.strip_prefix("@prefix") else {
+            return Ok(());
+        };
+        // The `@prefix :` directive sets the volume URI of standard AFF4
+        // volumes; other prefixes are not used by this support.
+        let parts: Vec<&str> = rest.split_whitespace().collect();
+        if parts.len() >= 2
+            && parts[0] == ":"
+            && self.volume_uri.is_empty()
+            && let Some(volume_iri) = Self::extract_iri(parts[1])
+        {
+            self.volume_uri = volume_iri.to_string();
+        }
+        Ok(())
+    }
+
+    /// Parses values enclosed in a parenthesized Turtle collection `(...)`.
+    fn parse_parenthesized_values(tokens: &[String], index: &mut usize, values: &mut Vec<String>) {
+        *index += 1;
+        while *index < tokens.len() && tokens[*index].as_str() != ")" {
+            if tokens[*index].as_str() == "," {
+                *index += 1;
+                continue;
+            }
+            values.push(Self::object_value(tokens[*index].as_str()));
+            *index += 1;
+        }
+        if *index < tokens.len() {
+            *index += 1;
+        }
+    }
+
+    /// Parses the object values of a single predicate until `;`, `.`, or end of tokens.
+    fn parse_predicate_values(tokens: &[String], index: &mut usize) -> Vec<String> {
+        let mut values: Vec<String> = Vec::new();
+
+        while *index < tokens.len() {
+            match tokens[*index].as_str() {
+                "," => {
+                    *index += 1;
+                }
+                // The statement separator (`;`) and the end-of-statement (`.`)
+                // are handled by the outer loop.
+                ";" | "." => break,
+                "(" => {
+                    Self::parse_parenthesized_values(tokens, index, &mut values);
+                    break;
+                }
+                _ => {
+                    values.push(Self::object_value(tokens[*index].as_str()));
+                    *index += 1;
+                }
+            }
+        }
+        values
+    }
+
+    /// Parses a single subject statement node starting at `*index`.
+    fn parse_statement_node(tokens: &[String], index: &mut usize) -> Aff4Node {
+        let subject: String = Self::object_value(tokens[*index].as_str());
+        *index += 1;
+
+        let mut node: Aff4Node = Aff4Node {
+            subject,
+            types: Vec::new(),
+            properties: Vec::new(),
+        };
+        while *index < tokens.len() {
+            match tokens[*index].as_str() {
+                "." => {
+                    *index += 1;
+                    break;
+                }
+                ";" => {
+                    *index += 1;
+                    continue;
+                }
+                _ => {}
+            }
+            let predicate: &str = tokens[*index].as_str();
+            let name: String = Self::predicate_local_name(predicate);
+            *index += 1;
+
+            let values: Vec<String> = Self::parse_predicate_values(tokens, index);
+            if values.is_empty() {
+                continue;
+            }
+            // `a` is the Turtle alias of the RDF type predicate.
+            if name == "type" || predicate == "a" {
+                // Types are stored as prefix local names (for example
+                // `ImageStream` for `aff4:ImageStream`).
+                node.types.extend(
+                    values
+                        .into_iter()
+                        .map(|value| Self::predicate_local_name(value.as_str())),
+                );
+            } else {
+                node.properties.push(Aff4NodeProperty::new(name, values));
+            }
+        }
+        node
+    }
+
     /// Parses the statement nodes from a token stream.
     fn parse_statements(tokens: &[String]) -> Vec<Aff4Node> {
         let mut nodes: Vec<Aff4Node> = Vec::new();
         let mut index: usize = 0;
 
         while index < tokens.len() {
-            let subject: String = Self::object_value(tokens[index].as_str());
-            index += 1;
-
-            let mut node: Aff4Node = Aff4Node {
-                subject,
-                types: Vec::new(),
-                properties: Vec::new(),
-            };
-            loop {
-                if index >= tokens.len() {
-                    break;
-                }
-                match tokens[index].as_str() {
-                    "." => {
-                        index += 1;
-                        break;
-                    }
-                    ";" => {
-                        index += 1;
-                        continue;
-                    }
-                    _ => {}
-                }
-                let predicate: String = tokens[index].clone();
-                let name: String = Self::predicate_local_name(predicate.as_str());
-                index += 1;
-
-                let mut values: Vec<String> = Vec::new();
-                loop {
-                    if index >= tokens.len() {
-                        break;
-                    }
-                    match tokens[index].as_str() {
-                        "," => {
-                            index += 1;
-                            continue;
-                        }
-                        // The statement separator (`;`) and the end-of-
-                        // statement (`.`) are handled by the outer loop.
-                        ";" | "." => break,
-                        "(" => {
-                            index += 1;
-                            while index < tokens.len() && tokens[index].as_str() != ")" {
-                                if tokens[index].as_str() == "," {
-                                    index += 1;
-                                    continue;
-                                }
-                                values.push(Self::object_value(tokens[index].as_str()));
-                                index += 1;
-                            }
-                            if index < tokens.len() {
-                                index += 1;
-                            }
-                            break;
-                        }
-                        _ => {
-                            values.push(Self::object_value(tokens[index].as_str()));
-                            index += 1;
-                        }
-                    }
-                }
-                if values.is_empty() {
-                    continue;
-                }
-                // `a` is the Turtle alias of the RDF type predicate.
-                if name == "type" || predicate == "a" {
-                    // Types are stored as prefix local names (for example
-                    // `ImageStream` for `aff4:ImageStream`).
-                    for value in values.drain(..) {
-                        node.types.push(Self::predicate_local_name(value.as_str()));
-                    }
-                } else {
-                    node.properties.push(Aff4NodeProperty::new(name, values));
-                }
-            }
-            nodes.push(node);
+            nodes.push(Self::parse_statement_node(tokens, &mut index));
         }
         nodes
     }
@@ -294,58 +359,33 @@ impl Aff4Information {
             if line.is_empty() {
                 continue;
             }
-            if line.starts_with("@") {
-                if line.starts_with("@base") {
-                    let rest: &str = line.trim_start_matches("@base").trim();
-                    let base: &str = match Self::extract_iri(rest) {
-                        Some(base) => base,
-                        None => {
-                            return Err(keramics_core::error_trace_new!(format!(
-                                "Unsupported @base directive: {}",
-                                line
-                            )));
-                        }
-                    };
-                    self.volume_uri = base.to_string();
-                } else if line.starts_with("@prefix") {
-                    // The `@prefix :` directive sets the volume URI of
-                    // standard AFF4 volumes; other prefixes are not used by
-                    // this support.
-                    let rest: &str = line.trim_start_matches("@prefix").trim();
-                    let parts: Vec<&str> = rest.split_whitespace().collect();
-                    if parts.len() >= 2 && parts[0] == ":" {
-                        if let Some(volume_iri) = Self::extract_iri(parts[1]) {
-                            if self.volume_uri.is_empty() {
-                                self.volume_uri = volume_iri.to_string();
-                            }
-                        }
-                    }
-                }
+            if line.starts_with('@') {
+                self.parse_directive(line)?;
                 continue;
             }
             body.push(line.to_string());
         }
         let nodes: Vec<Aff4Node> = Self::parse_statements(&Self::tokenize(&body.join("\n")));
+        let image_names: Vec<String> = Self::extract_image_names(&nodes);
 
-        // Derive the legacy image entry names from the `Image` typed nodes
-        // with a volume relative subject. Their leading slash is removed when
-        // stored as Zip entry names.
-        let mut image_names: Vec<String> = Vec::new();
-        for node in nodes.iter() {
-            let is_image: bool = node.is_type("Image")
-                || node.is_type("DiskImage")
-                || node.is_type("ContiguousDiskImage");
-            if is_image && !node.has_iri_subject() && node.subject != ":" {
-                let name: String = node.subject.trim_start_matches('/').to_string();
-                if !name.is_empty() && !image_names.contains(&name) {
-                    image_names.push(name);
-                }
-            }
-        }
         self.nodes = nodes;
         self.image_names = image_names;
 
         Ok(())
+    }
+
+    /// Skips an attached datatype annotation such as `^^xsd:long` or `^^aff4:SHA1`.
+    fn skip_datatype_annotation(chars: &[char], index: &mut usize) {
+        if *index + 1 >= chars.len() || chars[*index] != '^' || chars[*index + 1] != '^' {
+            return;
+        }
+        *index += 2;
+        while *index < chars.len()
+            && (chars[*index].is_ascii_alphanumeric()
+                || matches!(chars[*index], '_' | '-' | ':' | '.'))
+        {
+            *index += 1;
+        }
     }
 
     /// Tokenizes the statement body into parse tokens.
@@ -359,75 +399,75 @@ impl Aff4Information {
         let mut index: usize = 0;
 
         while index < chars.len() {
-            let character: char = chars[index];
-
-            if character.is_whitespace() {
+            if chars[index].is_whitespace() {
                 index += 1;
                 continue;
             }
-            match character {
-                '<' => {
-                    let start: usize = index;
-                    index += 1;
-                    while index < chars.len() && chars[index] != '>' {
-                        index += 1;
-                    }
-                    if index >= chars.len() {
-                        return tokens;
-                    }
-                    let iri: String = chars[(start + 1)..index].iter().collect();
-                    index += 1;
-                    tokens.push(format!("<{}>", iri));
-                }
-                '"' => {
-                    let start: usize = index;
-                    index += 1;
-                    while index < chars.len() && chars[index] != '"' {
-                        index += 1;
-                    }
-                    if index >= chars.len() {
-                        return tokens;
-                    }
-                    let value: String = chars[start + 1..index].iter().collect();
-                    index += 1;
-                    // Remove an attached datatype annotation such as
-                    // `^^xsd:long` or `^^aff4:SHA1`.
-                    if index + 1 < chars.len() && chars[index] == '^' && chars[index + 1] == '^' {
-                        index += 2;
-                        while index < chars.len()
-                            && (chars[index].is_ascii_alphanumeric()
-                                || chars[index] == '_'
-                                || chars[index] == '-'
-                                || chars[index] == ':'
-                                || chars[index] == '.')
-                        {
-                            index += 1;
-                        }
-                    }
-                    tokens.push(value);
-                }
-                ';' | '.' | ',' | '(' | ')' => {
-                    tokens.push(character.to_string());
-                    index += 1;
-                }
-                _ => {
-                    let mut token: String = String::new();
-                    while index < chars.len()
-                        && !chars[index].is_whitespace()
-                        && !matches!(chars[index], '<' | '"' | ';' | '.' | ',' | '(' | ')')
-                    {
-                        token.push(chars[index]);
-                        index += 1;
-                    }
-                    if token.is_empty() {
-                        index += 1;
-                    } else {
-                        tokens.push(token);
-                    }
-                }
+            match Self::tokenize_next(&chars, &mut index) {
+                Some(token) => tokens.push(token),
+                None => return tokens,
             }
         }
         tokens
+    }
+
+    /// Tokenizes an angle-bracketed IRI starting at `*index`.
+    fn tokenize_iri(chars: &[char], index: &mut usize) -> Option<String> {
+        let start: usize = *index;
+        *index += 1;
+        while *index < chars.len() && chars[*index] != '>' {
+            *index += 1;
+        }
+        if *index >= chars.len() {
+            return None;
+        }
+        let iri: String = chars[(start + 1)..*index].iter().collect();
+        *index += 1;
+        Some(format!("<{}>", iri))
+    }
+
+    /// Tokenizes the next non-whitespace token starting at `*index`.
+    fn tokenize_next(chars: &[char], index: &mut usize) -> Option<String> {
+        let character: char = chars[*index];
+
+        match character {
+            '<' => Self::tokenize_iri(chars, index),
+            '"' => Self::tokenize_string_literal(chars, index),
+            ';' | '.' | ',' | '(' | ')' => {
+                *index += 1;
+                Some(character.to_string())
+            }
+            _ => Some(Self::tokenize_word(chars, index)),
+        }
+    }
+
+    /// Tokenizes a double-quoted string literal and skips any attached datatype annotation.
+    fn tokenize_string_literal(chars: &[char], index: &mut usize) -> Option<String> {
+        let start: usize = *index;
+        *index += 1;
+        while *index < chars.len() && chars[*index] != '"' {
+            *index += 1;
+        }
+        if *index >= chars.len() {
+            return None;
+        }
+        let value: String = chars[start + 1..*index].iter().collect();
+        *index += 1;
+        Self::skip_datatype_annotation(chars, index);
+        Some(value)
+    }
+
+    /// Tokenizes a bare word token (prefixed name, keyword, or number).
+    fn tokenize_word(chars: &[char], index: &mut usize) -> String {
+        let mut token: String = String::new();
+        while *index < chars.len()
+            && !chars[*index].is_whitespace()
+            && !matches!(chars[*index], '<' | '"' | ';' | '.' | ',' | '(' | ')')
+        {
+            token.push(chars[*index]);
+            *index += 1;
+        }
+        token
     }
 }
 

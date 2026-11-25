@@ -237,17 +237,12 @@ impl DataVolume {
     ) -> Option<String> {
         for prefix_candidate in Self::entry_prefix_candidates(node_name) {
             let entry_name: String = format!("{}/{}", prefix_candidate, suffix);
+            let has_index: bool = index_suffix
+                .is_none_or(|suffix| self.has_entry(&format!("{}{}", entry_name, suffix)));
 
-            if !self.has_entry(entry_name.as_str()) {
-                continue;
+            if self.has_entry(entry_name.as_str()) && has_index {
+                return Some(prefix_candidate);
             }
-            if let Some(index_suffix) = index_suffix {
-                let index_entry_name: String = format!("{}{}", entry_name, index_suffix);
-                if !self.has_entry(index_entry_name.as_str()) {
-                    continue;
-                }
-            }
-            return Some(prefix_candidate);
         }
         None
     }
@@ -391,13 +386,12 @@ impl Aff4StandardMedia {
         let base_file_name: String = primary_file_name
             .rsplit_once('/')
             .map(|(_, file_name)| file_name.to_string())
-            .unwrap_or(primary_file_name.clone());
+            .unwrap_or_else(|| primary_file_name.clone());
 
         // Split volume companions are derived from the container file name.
         for index in 1..=32 {
             candidate_names.push(format!("{directory}{base_file_name}.A{index:02}"));
         }
-
         // The data stream nodes referenced as stored in another volume by an
         // absolute volume URI; the companion volumes are the containers
         // storing those streams.
@@ -411,98 +405,299 @@ impl Aff4StandardMedia {
             .map(String::from)
             .collect();
 
-        // List the base directory and the directory containing the primary
-        // volume (when different).
-        let mut directory_paths: Vec<Vec<PathComponent>> = Vec::new();
-        directory_paths.push(Vec::new());
-        if !directory.is_empty() {
-            let mut directory_path: Vec<PathComponent> = Vec::new();
-            for directory_part in directory.split('/') {
-                if !directory_part.is_empty() {
-                    directory_path.push(PathComponent::from(directory_part));
-                }
-            }
-            if !directory_path.is_empty() {
-                directory_paths.push(directory_path);
-            }
-        }
-        for directory_path in directory_paths.iter() {
-            match file_resolver.list_file_names(directory_path.as_slice()) {
-                Ok(listed_file_names) => {
-                    for listed_file_name in listed_file_names {
-                        let lowercased: String = listed_file_name.to_ascii_lowercase();
-                        if !lowercased.ends_with(".aff4") && !lowercased.ends_with(".af4") {
-                            continue;
-                        }
-                        if listed_file_name == base_file_name && directory_path.is_empty() {
-                            continue;
-                        }
-                        let candidate_name: String = if directory.is_empty() {
-                            listed_file_name.clone()
-                        } else {
-                            format!("{}/{}", directory, listed_file_name)
-                        };
-                        if stored_volume_uris.is_empty()
-                            && !Self::is_split_companion_name(
-                                candidate_name.as_str(),
-                                primary_file_name.as_str(),
-                            )
-                        {
-                            // Without a volume reference a listed container
-                            // is only a split companion candidate.
-                            continue;
-                        }
-                        if !candidate_names.contains(&candidate_name) {
-                            candidate_names.push(candidate_name);
-                        }
-                    }
-                }
-                Err(_) => {
-                    // A directory listing is not required; only the named
-                    // companion containers are resolved when it is not
-                    // available.
-                }
-            }
-        }
-
+        Self::collect_listed_companion_candidates(
+            file_resolver,
+            directory.as_str(),
+            base_file_name.as_str(),
+            primary_file_name.as_str(),
+            !stored_volume_uris.is_empty(),
+            &mut candidate_names,
+        );
         // Open the candidate containers; a listed container is only
         // accepted as a companion volume when a data stream node references
         // it or it is a split companion of the primary container.
         for candidate_name in candidate_names.iter() {
-            if *candidate_name == primary_file_name {
-                continue;
-            }
-            if volumes
-                .iter()
-                .any(|existing| existing.file_name == *candidate_name)
+            if *candidate_name == primary_file_name
+                || volumes
+                    .iter()
+                    .any(|existing| existing.file_name == *candidate_name)
             {
                 continue;
             }
-            let path_component: PathComponent = PathComponent::from(candidate_name.as_str());
-
-            match DataVolume::open(file_resolver, &path_component) {
-                Ok(volume) => {
-                    if !volume.information.is_standard() {
-                        // Non-standard or unreadable containers are not
-                        // companion volumes.
-                        continue;
-                    }
-                    if Self::is_split_companion_name(
-                        candidate_name.as_str(),
-                        primary_file_name.as_str(),
-                    ) || stored_volume_uris
-                        .iter()
-                        .any(|stored_uri| volume.volume_uri == *stored_uri)
-                    {
-                        volumes.push(volume);
-                    }
-                }
-                _ => {
-                    // Unreadable containers are not companion volumes.
-                }
+            if let Some(volume) = Self::try_open_companion_volume(
+                file_resolver,
+                candidate_name.as_str(),
+                primary_file_name.as_str(),
+                &stored_volume_uris,
+            ) {
+                volumes.push(volume);
             }
         }
         Ok(())
+    }
+
+    /// Groups `ImageStream` nodes from a single volume into identity groups.
+    fn add_volume_stream_nodes(
+        volume_index: usize,
+        volume: &DataVolume,
+        stream_identities: &mut Vec<String>,
+        stream_identity_groups: &mut Vec<Vec<(usize, Aff4Node)>>,
+    ) {
+        for node in volume.information.nodes.iter() {
+            if !node.is_type("ImageStream") {
+                continue;
+            }
+            let identity: String = Self::stream_identity(node.subject.as_str());
+            if identity.is_empty() {
+                continue;
+            }
+            match stream_identities
+                .iter()
+                .position(|existing| existing == &identity)
+            {
+                Some(index) => {
+                    stream_identity_groups[index].push((volume_index, node.clone()));
+                }
+                None => {
+                    stream_identities.push(identity);
+                    stream_identity_groups.push(vec![(volume_index, node.clone())]);
+                }
+            }
+        }
+    }
+
+    /// Appends valid companion file name candidates from a directory listing.
+    fn append_listed_candidates(
+        listed_file_names: Vec<String>,
+        directory: &str,
+        base_file_name: &str,
+        primary_file_name: &str,
+        has_stored_volume_uris: bool,
+        is_base_directory: bool,
+        candidate_names: &mut Vec<String>,
+    ) {
+        for listed_file_name in listed_file_names {
+            let candidate_name: String = if directory.is_empty() {
+                listed_file_name.clone()
+            } else {
+                format!("{}/{}", directory, listed_file_name)
+            };
+            if Self::is_valid_listed_candidate(
+                listed_file_name.as_str(),
+                candidate_name.as_str(),
+                base_file_name,
+                primary_file_name,
+                has_stored_volume_uris,
+                is_base_directory,
+            ) && !candidate_names.contains(&candidate_name)
+            {
+                candidate_names.push(candidate_name);
+            }
+        }
+    }
+
+    /// Appends unique string items into `target` while preserving order.
+    fn append_unique_strings(target: &mut Vec<String>, items: Vec<String>) {
+        for item in items {
+            if !target.contains(&item) {
+                target.push(item);
+            }
+        }
+    }
+
+    /// Builds the directory paths to scan for companion volumes.
+    fn build_directory_paths(directory: &str) -> Vec<Vec<PathComponent>> {
+        let mut directory_paths: Vec<Vec<PathComponent>> = vec![Vec::new()];
+
+        if !directory.is_empty() {
+            let directory_path: Vec<PathComponent> = directory
+                .split('/')
+                .filter(|directory_part| !directory_part.is_empty())
+                .map(PathComponent::from)
+                .collect();
+            if !directory_path.is_empty() {
+                directory_paths.push(directory_path);
+            }
+        }
+        directory_paths
+    }
+
+    /// Collects companion volume candidate file names from directory listings.
+    fn collect_listed_companion_candidates(
+        file_resolver: &FileResolverReference,
+        directory: &str,
+        base_file_name: &str,
+        primary_file_name: &str,
+        has_stored_volume_uris: bool,
+        candidate_names: &mut Vec<String>,
+    ) {
+        let directory_paths: Vec<Vec<PathComponent>> = Self::build_directory_paths(directory);
+
+        for directory_path in directory_paths.iter() {
+            // A directory listing is not required; only the named companion
+            // containers are resolved when it is not available.
+            let Ok(listed_file_names) = file_resolver.list_file_names(directory_path.as_slice())
+            else {
+                continue;
+            };
+            Self::append_listed_candidates(
+                listed_file_names,
+                directory,
+                base_file_name,
+                primary_file_name,
+                has_stored_volume_uris,
+                directory_path.is_empty(),
+                candidate_names,
+            );
+        }
+    }
+
+    /// Determines the media size from the image node, map, or streams.
+    fn determine_media_size(
+        image_node: Option<&Aff4Node>,
+        map: Option<&ResolvedMap>,
+        streams: &[ResolvedStream],
+    ) -> u64 {
+        if let Some(media_size) = image_node.and_then(|node| node.get_u64_property("size")) {
+            return media_size;
+        }
+        if let Some(map) = map {
+            return map
+                .entries
+                .iter()
+                .map(|entry| entry.mapped_offset + entry.length)
+                .max()
+                .unwrap_or(0);
+        }
+        let stream_size: u64 = streams.iter().map(|stream| stream.size).max().unwrap_or(0);
+        if stream_size > 0 {
+            stream_size
+        } else {
+            streams[0].get_number_of_chunks() as u64 * streams[0].chunk_size as u64
+        }
+    }
+
+    /// Extracts merged stream metadata and candidate names from a stream node group.
+    fn extract_stream_metadata(
+        group: &[(usize, Aff4Node)],
+    ) -> (usize, usize, CompressionMethod, u64, Vec<String>) {
+        let chunk_size: usize = group
+            .iter()
+            .filter_map(|(_volume_index, node)| node.get_u64_property("chunkSize"))
+            .find(|&value| value > 0)
+            .unwrap_or(0) as usize;
+        let chunks_in_segment: usize = group
+            .iter()
+            .filter_map(|(_volume_index, node)| node.get_u64_property("chunksInSegment"))
+            .find(|&value| value > 0)
+            .map_or(AFF4_STANDARD_DEFAULT_CHUNKS_IN_SEGMENT, |value| {
+                value as usize
+            });
+        let compression_method: CompressionMethod = group
+            .iter()
+            .filter_map(|(_volume_index, node)| node.get_property_value("compressionMethod"))
+            .next()
+            .map_or(CompressionMethod::Stored, CompressionMethod::from_iri);
+        let size: u64 = group
+            .iter()
+            .filter_map(|(_volume_index, node)| node.get_u64_property("size"))
+            .max()
+            .unwrap_or(0);
+
+        let mut name_candidates: Vec<String> = Vec::new();
+        for (_volume_index, node) in group.iter() {
+            Self::append_unique_strings(
+                &mut name_candidates,
+                Self::stream_name_candidates(node.subject.as_str()),
+            );
+        }
+        (
+            chunk_size,
+            chunks_in_segment,
+            compression_method,
+            size,
+            name_candidates,
+        )
+    }
+
+    /// Finds the preferred `Image` node across all loaded volumes.
+    fn find_image_node(volumes: &[DataVolume]) -> Option<&Aff4Node> {
+        let mut fallback_image_node: Option<&Aff4Node> = None;
+
+        for node in volumes
+            .iter()
+            .flat_map(|volume| volume.information.nodes.iter())
+            .filter(|node| node.is_type("Image"))
+        {
+            if node.get_u64_property("size").is_some() {
+                return Some(node);
+            }
+            if fallback_image_node.is_none() {
+                fallback_image_node = Some(node);
+            }
+        }
+        fallback_image_node
+    }
+
+    /// Finds the volume and `Map` node with the specified subject IRI.
+    fn find_map_node<'a>(
+        volumes: &'a [DataVolume],
+        map_iri: &str,
+    ) -> Option<(&'a DataVolume, &'a Aff4Node)> {
+        volumes.iter().find_map(|volume| {
+            volume
+                .information
+                .nodes
+                .iter()
+                .find(|node| node.is_type("Map") && node.subject == map_iri)
+                .map(|node| (volume, node))
+        })
+    }
+
+    /// Searches loaded volumes for the bevy segments of a single stream name candidate.
+    fn find_stream_for_candidate<'a>(
+        volumes: &'a [DataVolume],
+        name_candidate: &str,
+        chunks_in_segment: usize,
+        expected_number_of_chunks: usize,
+    ) -> Option<(&'a DataVolume, Vec<ResolvedSegment>)> {
+        for volume in volumes.iter() {
+            let Some(entry_prefix) =
+                volume.get_entry_prefix_for_node_name(name_candidate, "00000000", Some(".index"))
+            else {
+                continue;
+            };
+            let segments: Vec<ResolvedSegment> = Self::read_volume_stream_segments(
+                volume,
+                entry_prefix.as_str(),
+                chunks_in_segment,
+                expected_number_of_chunks,
+            );
+            if !segments.is_empty() {
+                return Some((volume, segments));
+            }
+        }
+        None
+    }
+
+    /// Searches loaded volumes for the bevy segments of any of the stream name candidates.
+    fn find_stream_in_volumes<'a>(
+        volumes: &'a [DataVolume],
+        name_candidates: &[String],
+        chunks_in_segment: usize,
+        expected_number_of_chunks: usize,
+    ) -> Option<(&'a DataVolume, Vec<ResolvedSegment>)> {
+        for name_candidate in name_candidates.iter() {
+            if let Some(found) = Self::find_stream_for_candidate(
+                volumes,
+                name_candidate.as_str(),
+                chunks_in_segment,
+                expected_number_of_chunks,
+            ) {
+                return Some(found);
+            }
+        }
+        None
     }
 
     /// Retrieves the bytes per sector.
@@ -520,6 +715,32 @@ impl Aff4StandardMedia {
         self.media_size
     }
 
+    /// Groups all `ImageStream` nodes across the loaded volumes by stream identity.
+    fn group_image_stream_nodes(
+        volumes: &[DataVolume],
+    ) -> (Vec<String>, Vec<Vec<(usize, Aff4Node)>>) {
+        let mut stream_identities: Vec<String> = Vec::new();
+        let mut stream_identity_groups: Vec<Vec<(usize, Aff4Node)>> = Vec::new();
+
+        for (volume_index, volume) in volumes.iter().enumerate() {
+            Self::add_volume_stream_nodes(
+                volume_index,
+                volume,
+                &mut stream_identities,
+                &mut stream_identity_groups,
+            );
+        }
+        (stream_identities, stream_identity_groups)
+    }
+
+    /// Determines if a lowercased target IRI represents a zero-filled gap.
+    fn is_gap_target(lowercased: &str) -> bool {
+        matches!(lowercased, "zero" | "aff4:zero" | "aff4://zero")
+            || lowercased.ends_with("#zero")
+            || lowercased.ends_with("#unknowndata")
+            || lowercased.ends_with("#unreadabledata")
+    }
+
     /// Determines if the media is read through a map.
     pub fn is_mapped(&self) -> bool {
         self.map.is_some()
@@ -535,6 +756,27 @@ impl Aff4StandardMedia {
             Some(index) => (1..=32).contains(&index),
             None => false,
         }
+    }
+
+    /// Determines if a listed file name is a valid companion container candidate.
+    fn is_valid_listed_candidate(
+        listed_file_name: &str,
+        candidate_name: &str,
+        base_file_name: &str,
+        primary_file_name: &str,
+        has_stored_volume_uris: bool,
+        is_base_directory: bool,
+    ) -> bool {
+        let lowercased: String = listed_file_name.to_ascii_lowercase();
+        if !lowercased.ends_with(".aff4") && !lowercased.ends_with(".af4") {
+            return false;
+        }
+        if listed_file_name == base_file_name && is_base_directory {
+            return false;
+        }
+        // Without a volume reference a listed container is only a split
+        // companion candidate.
+        has_stored_volume_uris || Self::is_split_companion_name(candidate_name, primary_file_name)
     }
 
     /// Opens the AFF4 Standard media stored in the volume with the specified file name.
@@ -557,7 +799,6 @@ impl Aff4StandardMedia {
                 return Err(error);
             }
         };
-
         if !primary_volume.information.is_standard() {
             return Err(keramics_core::error_trace_new!(format!(
                 "Volume: {} does not contain standard AFF4 nodes",
@@ -572,144 +813,42 @@ impl Aff4StandardMedia {
                 return Err(error);
             }
         }
+        let (stream_identities, stream_identity_groups): (
+            Vec<String>,
+            Vec<Vec<(usize, Aff4Node)>>,
+        ) = Self::group_image_stream_nodes(&volumes);
 
-        // Group the data stream nodes by their identity.
-        let mut stream_identities: Vec<String> = Vec::new();
-        let mut stream_identity_groups: Vec<Vec<(usize, Aff4Node)>> = Vec::new();
-        for (volume_index, volume) in volumes.iter().enumerate() {
-            for node in volume.information.nodes.iter() {
-                if !node.is_type("ImageStream") {
-                    continue;
-                }
-                let identity: String = Self::stream_identity(node.subject.as_str());
-                if identity.is_empty() {
-                    continue;
-                }
-                let mut group_index: Option<usize> = None;
-                for (index, group) in stream_identity_groups.iter().enumerate() {
-                    let group_identity: String = Self::stream_identity(group[0].1.subject.as_str());
-                    if group_identity == identity {
-                        group_index = Some(index);
-                        break;
-                    }
-                }
-                match group_index {
-                    Some(index) => {
-                        stream_identity_groups[index].push((volume_index, node.clone()));
-                    }
-                    None => {
-                        if !stream_identities.contains(&identity) {
-                            stream_identities.push(identity);
-                        }
-                        stream_identity_groups.push(vec![(volume_index, node.clone())]);
-                    }
-                }
-            }
-        }
         if stream_identity_groups.is_empty() {
             return Err(keramics_core::error_trace_new!(
                 "Missing data stream node in information container"
             ));
         }
-
         // Resolve the data streams; those without data entries in any of the
         // volumes are only kept when required by the map.
-        let mut streams: Vec<ResolvedStream> = Vec::new();
-        for (index, group) in stream_identity_groups.iter().enumerate() {
-            let identity: String = stream_identities[index].clone();
-            if let Some(stream) = Self::resolve_stream(&volumes, &identity, group) {
-                streams.push(stream);
-            }
-        }
+        let streams: Vec<ResolvedStream> = stream_identity_groups
+            .iter()
+            .enumerate()
+            .filter_map(|(index, group)| {
+                Self::resolve_stream(&volumes, stream_identities[index].as_str(), group)
+            })
+            .collect();
         if streams.is_empty() {
             return Err(keramics_core::error_trace_new!(
                 "Missing data entry for image stream in volume"
             ));
         }
-
-        // Resolve the image node; when the image points to a map node the
-        // media is read through the map.
-        let image_node: Option<&Aff4Node> = {
-            let mut sized_image_node: Option<&Aff4Node> = None;
-            let mut image_node: Option<&Aff4Node> = None;
-
-            for volume in volumes.iter() {
-                for node in volume.information.nodes.iter() {
-                    if !node.is_type("Image") {
-                        continue;
-                    }
-                    if node.get_u64_property("size").is_some() {
-                        if sized_image_node.is_none() {
-                            sized_image_node = Some(node);
-                        }
-                    } else if image_node.is_none() {
-                        image_node = Some(node);
-                    }
-                }
-            }
-            match sized_image_node {
-                Some(image_node) => Some(image_node),
-                None => image_node,
-            }
-        };
-
-        let bytes_per_sector: u32 =
-            match image_node.and_then(|node| node.get_u64_property("blockSize")) {
-                Some(block_size) => block_size as u32,
-                None => AFF4_DEFAULT_BYTES_PER_SECTOR,
-            };
-
-        let map: Option<ResolvedMap> =
-            match image_node.and_then(|node| node.get_property_value("dataStream")) {
-                Some(map_iri) => match Self::resolve_map(&volumes, &streams, map_iri) {
-                    Ok(map) => Some(map),
-                    Err(error) => {
-                        // When the data stream reference points to a map
-                        // node the map is required; reading the media data
-                        // directly from the data streams would silently
-                        // deliver the wrong data.
-                        let references_map_node: bool = volumes.iter().any(|volume| {
-                            volume
-                                .information
-                                .nodes
-                                .iter()
-                                .any(|node| node.is_type("Map") && node.subject == map_iri)
-                        });
-                        if references_map_node {
-                            return Err(error);
-                        }
-                        None
-                    }
-                },
-                None => None,
-            };
-
-        // Determine the media size.
-        let media_size: u64 = match image_node.and_then(|node| node.get_u64_property("size")) {
-            Some(media_size) => media_size,
-            None => match map.as_ref() {
-                Some(map) => map
-                    .entries
-                    .iter()
-                    .map(|entry| entry.mapped_offset + entry.length)
-                    .max()
-                    .unwrap_or(0),
-                None => {
-                    let stream_size: u64 =
-                        streams.iter().map(|stream| stream.size).max().unwrap_or(0);
-                    if stream_size > 0 {
-                        stream_size
-                    } else {
-                        streams[0].get_number_of_chunks() as u64 * streams[0].chunk_size as u64
-                    }
-                }
-            },
-        };
+        let image_node: Option<&Aff4Node> = Self::find_image_node(&volumes);
+        let bytes_per_sector: u32 = image_node
+            .and_then(|node| node.get_u64_property("blockSize"))
+            .map_or(AFF4_DEFAULT_BYTES_PER_SECTOR, |block_size| {
+                block_size as u32
+            });
+        let map: Option<ResolvedMap> = Self::resolve_optional_map(&volumes, &streams, image_node)?;
+        let media_size: u64 = Self::determine_media_size(image_node, map.as_ref(), &streams);
         let image_name: String = match image_node {
             Some(node) if node.subject != ":" => node.subject.clone(),
             _ => streams[0].name.clone(),
         };
-
         Ok(Aff4StandardMedia {
             streams,
             map,
@@ -719,53 +858,67 @@ impl Aff4StandardMedia {
         })
     }
 
-    /// Resolves the map node referenced by the image data stream.
-    fn resolve_map(
-        volumes: &[DataVolume],
-        streams: &[ResolvedStream],
-        map_iri: &str,
-    ) -> Result<ResolvedMap, ErrorTrace> {
-        let mut map_volume: Option<&DataVolume> = None;
-        let mut map_node: Option<&Aff4Node> = None;
-        for volume in volumes.iter() {
-            for node in volume.information.nodes.iter() {
-                if node.is_type("Map") && node.subject == map_iri {
-                    map_volume = Some(volume);
-                    map_node = Some(node);
-                    break;
-                }
-            }
-            if map_node.is_some() {
-                break;
-            }
+    /// Parses bevy index entries from raw index data.
+    fn parse_bevy_index_entries(index_data: &[u8]) -> Option<Vec<BevyIndexEntry>> {
+        if index_data.is_empty()
+            || !index_data
+                .len()
+                .is_multiple_of(AFF4_STANDARD_BEVY_INDEX_ENTRY_SIZE)
+        {
+            return None;
         }
-        let (map_volume, map_node): (&DataVolume, &Aff4Node) = match (map_volume, map_node) {
-            (Some(map_volume), Some(map_node)) => (map_volume, map_node),
-            _ => {
-                return Err(keramics_core::error_trace_new!(format!(
-                    "Missing map node: {} in volume",
-                    map_iri
-                )));
-            }
-        };
+        let mut index_entries: Vec<BevyIndexEntry> = Vec::new();
 
-        // The map target table is stored as a sibling entry of the map data
-        // entry (`<prefix>/map` and `<prefix>/idx`).
-        let entry_prefix: Option<String> =
-            map_volume.get_entry_prefix_for_node_name(map_iri, "map", None);
-        let entry_prefix: String = match entry_prefix {
-            Some(entry_prefix) if map_volume.has_entry(&format!("{}/idx", entry_prefix)) => {
-                entry_prefix
-            }
-            _ => {
-                return Err(keramics_core::error_trace_new!(format!(
-                    "Missing map entries for node: {}",
-                    map_iri
-                )));
-            }
-        };
+        for chunk in index_data.chunks_exact(AFF4_STANDARD_BEVY_INDEX_ENTRY_SIZE) {
+            let bevy_offset: u64 = u64::from_le_bytes(chunk[0..8].try_into().unwrap());
+            let stored_size: u32 = u32::from_le_bytes(chunk[8..12].try_into().unwrap());
+            index_entries.push(BevyIndexEntry {
+                bevy_offset,
+                stored_size,
+            });
+        }
+        Some(index_entries)
+    }
 
-        // Read the target identities of the map.
+    /// Parses and sorts resolved map entries from raw binary map data.
+    fn parse_map_entries(
+        map_data: &[u8],
+        target_identities: &[String],
+        stream_identities: &[String],
+    ) -> Result<Vec<ResolvedMapEntry>, ErrorTrace> {
+        if !map_data.len().is_multiple_of(AFF4_STANDARD_MAP_ENTRY_SIZE) {
+            return Err(keramics_core::error_trace_new!(format!(
+                "Unsupported map data size: {}",
+                map_data.len()
+            )));
+        }
+        let mut entries: Vec<ResolvedMapEntry> = Vec::new();
+
+        for chunk in map_data.chunks_exact(AFF4_STANDARD_MAP_ENTRY_SIZE) {
+            let mapped_offset: u64 = u64::from_le_bytes(chunk[0..8].try_into().unwrap());
+            let length: u64 = u64::from_le_bytes(chunk[8..16].try_into().unwrap());
+            let target_offset: u64 = u64::from_le_bytes(chunk[16..24].try_into().unwrap());
+            let target_index: i32 = i32::from_le_bytes(chunk[24..28].try_into().unwrap());
+            let target: MapTarget = target_identities
+                .get(target_index as usize)
+                .and_then(|identity| Self::resolve_map_target(identity.as_str(), stream_identities))
+                .unwrap_or(MapTarget::Gap);
+            entries.push(ResolvedMapEntry {
+                mapped_offset,
+                length,
+                target_offset,
+                target,
+            });
+        }
+        entries.sort_by_key(|entry| entry.mapped_offset);
+        Ok(entries)
+    }
+
+    /// Reads and parses the map target identities table (`<prefix>/idx`).
+    fn parse_map_target_identities(
+        map_volume: &DataVolume,
+        entry_prefix: &str,
+    ) -> Result<Vec<String>, ErrorTrace> {
         let index_data: Vec<u8> = match map_volume.read_entry_data(&format!("{}/idx", entry_prefix))
         {
             Ok(index_data) => index_data,
@@ -774,21 +927,104 @@ impl Aff4StandardMedia {
                 return Err(error);
             }
         };
-        let target_identities: Vec<String> = match String::from_utf8(index_data) {
-            Ok(index_data) => index_data
+        match String::from_utf8(index_data) {
+            Ok(index_data) => Ok(index_data
                 .split(['\n', '\r', '\0'])
                 .map(|target_identity| target_identity.trim().to_string())
                 .filter(|target_identity| !target_identity.is_empty())
-                .collect(),
-            Err(error) => {
-                return Err(keramics_core::error_trace_new!(format!(
-                    "Unsupported encoding of map target identities with error: {}",
-                    error
-                )));
-            }
-        };
+                .collect()),
+            Err(error) => Err(keramics_core::error_trace_new!(format!(
+                "Unsupported encoding of map target identities with error: {}",
+                error
+            ))),
+        }
+    }
 
-        // Resolve the streams referenced by the map target identities.
+    /// Reads a single bevy segment (data entry name and parsed index entries) from a volume.
+    fn read_bevy_segment(
+        volume: &DataVolume,
+        entry_prefix: &str,
+        first_chunk_index: usize,
+    ) -> Option<ResolvedSegment> {
+        let segment: String = format!("{:08x}", first_chunk_index);
+        let segment_data_entry_name: String = format!("{}/{}", entry_prefix, segment);
+        let segment_index_entry_name: String = format!("{}/{}.index", entry_prefix, segment);
+
+        if !volume.has_entry(segment_data_entry_name.as_str())
+            || !volume.has_entry(segment_index_entry_name.as_str())
+        {
+            return None;
+        }
+        let index_data: Vec<u8> = volume
+            .read_entry_data(segment_index_entry_name.as_str())
+            .ok()?;
+        let index_entries: Vec<BevyIndexEntry> = Self::parse_bevy_index_entries(&index_data)?;
+
+        Some(ResolvedSegment {
+            first_chunk_index,
+            data_entry_name: segment_data_entry_name,
+            index_entries,
+        })
+    }
+
+    /// Reads all consecutive bevy segments for a stream from a volume.
+    fn read_volume_stream_segments(
+        volume: &DataVolume,
+        entry_prefix: &str,
+        chunks_in_segment: usize,
+        expected_number_of_chunks: usize,
+    ) -> Vec<ResolvedSegment> {
+        let mut segments: Vec<ResolvedSegment> = Vec::new();
+        let mut total_chunks: usize = 0;
+
+        for segments_read in 0..AFF4_STANDARD_MAXIMUM_NUMBER_OF_SEGMENTS {
+            let first_chunk_index: usize = segments_read * chunks_in_segment;
+            let Some(segment) = Self::read_bevy_segment(volume, entry_prefix, first_chunk_index)
+            else {
+                break;
+            };
+            total_chunks += segment.index_entries.len();
+            segments.push(segment);
+
+            if expected_number_of_chunks > 0 && total_chunks >= expected_number_of_chunks {
+                break;
+            }
+        }
+        segments
+    }
+
+    /// Resolves the map node referenced by the image data stream.
+    fn resolve_map(
+        volumes: &[DataVolume],
+        streams: &[ResolvedStream],
+        map_iri: &str,
+    ) -> Result<ResolvedMap, ErrorTrace> {
+        let (map_volume, map_node): (&DataVolume, &Aff4Node) =
+            match Self::find_map_node(volumes, map_iri) {
+                Some(result) => result,
+                None => {
+                    return Err(keramics_core::error_trace_new!(format!(
+                        "Missing map node: {} in volume",
+                        map_iri
+                    )));
+                }
+            };
+        // The map target table is stored as a sibling entry of the map data
+        // entry (`<prefix>/map` and `<prefix>/idx`).
+        let entry_prefix: String =
+            match map_volume.get_entry_prefix_for_node_name(map_iri, "map", None) {
+                Some(entry_prefix) if map_volume.has_entry(&format!("{}/idx", entry_prefix)) => {
+                    entry_prefix
+                }
+                _ => {
+                    return Err(keramics_core::error_trace_new!(format!(
+                        "Missing map entries for node: {}",
+                        map_iri
+                    )));
+                }
+            };
+        let target_identities: Vec<String> =
+            Self::parse_map_target_identities(map_volume, entry_prefix.as_str())?;
         let stream_identities: Vec<String> =
             streams.iter().map(|stream| stream.name.clone()).collect();
 
@@ -807,41 +1043,8 @@ impl Aff4StandardMedia {
                 return Err(error);
             }
         };
-        if map_data.len() % AFF4_STANDARD_MAP_ENTRY_SIZE != 0 {
-            return Err(keramics_core::error_trace_new!(format!(
-                "Unsupported map data size: {}",
-                map_data.len()
-            )));
-        }
-        let mut entries: Vec<ResolvedMapEntry> = Vec::new();
-        for entry_index in 0..(map_data.len() / AFF4_STANDARD_MAP_ENTRY_SIZE) {
-            let offset: usize = entry_index * AFF4_STANDARD_MAP_ENTRY_SIZE;
-            let mapped_offset: u64 =
-                u64::from_le_bytes(map_data[offset..(offset + 8)].try_into().unwrap());
-            let length: u64 =
-                u64::from_le_bytes(map_data[(offset + 8)..(offset + 16)].try_into().unwrap());
-            let target_offset: u64 =
-                u64::from_le_bytes(map_data[(offset + 16)..(offset + 24)].try_into().unwrap());
-            let target_index: i32 =
-                i32::from_le_bytes(map_data[(offset + 24)..(offset + 28)].try_into().unwrap());
-            let target_identity: Option<&str> = target_identities
-                .get(target_index as usize)
-                .map(String::as_str);
-            let target: MapTarget = match target_identity {
-                Some(target_identity) => {
-                    Self::resolve_map_target(target_identity, &stream_identities)
-                        .unwrap_or(MapTarget::Gap)
-                }
-                None => MapTarget::Gap,
-            };
-            entries.push(ResolvedMapEntry {
-                mapped_offset,
-                length,
-                target_offset,
-                target,
-            });
-        }
-        entries.sort_by_key(|entry| entry.mapped_offset);
+        let entries: Vec<ResolvedMapEntry> =
+            Self::parse_map_entries(&map_data, &target_identities, &stream_identities)?;
 
         Ok(ResolvedMap {
             entries,
@@ -858,34 +1061,48 @@ impl Aff4StandardMedia {
     fn resolve_map_target(target: &str, stream_identities: &[String]) -> Option<MapTarget> {
         let lowercased: String = target.to_ascii_lowercase();
 
-        if lowercased == "zero"
-            || lowercased == "aff4:zero"
-            || lowercased == "aff4://zero"
-            || lowercased.ends_with("#zero")
-            || lowercased.ends_with("#unknowndata")
-            || lowercased.ends_with("#unreadabledata")
-        {
+        if Self::is_gap_target(lowercased.as_str()) {
             return Some(MapTarget::Gap);
         }
-        if let Some(symbolic_index) = lowercased.find("symbolicstream") {
-            let symbolic_value: &str =
-                lowercased[(symbolic_index + "symbolicstream".len())..].trim();
-            if !symbolic_value.is_empty() {
-                if let Some(byte) = u8::from_str_radix(symbolic_value, 16).ok() {
-                    return Some(MapTarget::Symbolic(byte));
-                }
-            }
+        let symbolic_byte: Option<u8> = lowercased.find("symbolicstream").and_then(|index| {
+            let symbolic_value: &str = lowercased[(index + "symbolicstream".len())..].trim();
+            u8::from_str_radix(symbolic_value, 16).ok()
+        });
+        if let Some(byte) = symbolic_byte {
+            return Some(MapTarget::Symbolic(byte));
         }
         let target_identity: String = Self::stream_identity(target);
-        if !target_identity.is_empty() {
-            if let Some(position) = stream_identities
-                .iter()
-                .position(|stream_identity| stream_identity == &target_identity)
-            {
-                return Some(MapTarget::Stream(position));
+        if target_identity.is_empty() {
+            return None;
+        }
+        stream_identities
+            .iter()
+            .position(|stream_identity| stream_identity == &target_identity)
+            .map(MapTarget::Stream)
+    }
+
+    /// Resolves the optional map referenced by an image node, returning an error if a declared map fails to resolve.
+    fn resolve_optional_map(
+        volumes: &[DataVolume],
+        streams: &[ResolvedStream],
+        image_node: Option<&Aff4Node>,
+    ) -> Result<Option<ResolvedMap>, ErrorTrace> {
+        let Some(map_iri) = image_node.and_then(|node| node.get_property_value("dataStream"))
+        else {
+            return Ok(None);
+        };
+        match Self::resolve_map(volumes, streams, map_iri) {
+            Ok(map) => Ok(Some(map)),
+            Err(error) => {
+                // When the data stream reference points to a map node the map
+                // is required; reading the media data directly from the data
+                // streams would silently deliver the wrong data.
+                if Self::find_map_node(volumes, map_iri).is_some() {
+                    return Err(error);
+                }
+                Ok(None)
             }
         }
-        None
     }
 
     /// Resolves the data stream with the specified identity.
@@ -899,146 +1116,37 @@ impl Aff4StandardMedia {
         identity: &str,
         group: &[(usize, Aff4Node)],
     ) -> Option<ResolvedStream> {
-        let mut chunk_size: usize = 0;
-        let chunks_in_segment: usize = {
-            let mut chunks_in_segment: usize = AFF4_STANDARD_DEFAULT_CHUNKS_IN_SEGMENT;
+        let (chunk_size, chunks_in_segment, compression_method, size, name_candidates): (
+            usize,
+            usize,
+            CompressionMethod,
+            u64,
+            Vec<String>,
+        ) = Self::extract_stream_metadata(group);
 
-            for (_volume_index, node) in group.iter() {
-                if let Some(node_chunks_in_segment) = node.get_u64_property("chunksInSegment") {
-                    if node_chunks_in_segment > 0 {
-                        chunks_in_segment = node_chunks_in_segment as usize;
-                        break;
-                    }
-                }
-            }
-            chunks_in_segment
-        };
-        let compression_method: CompressionMethod = {
-            let mut compression_method: CompressionMethod = CompressionMethod::Stored;
-
-            for (_volume_index, node) in group.iter() {
-                if let Some(compression_iri) = node.get_property_value("compressionMethod") {
-                    compression_method = CompressionMethod::from_iri(compression_iri);
-                    break;
-                }
-            }
-            compression_method
-        };
-        let size: u64 = group
-            .iter()
-            .filter_map(|(_volume_index, node)| node.get_u64_property("size"))
-            .max()
-            .unwrap_or(0);
-        let mut name_candidates: Vec<String> = Vec::new();
-
-        for (_volume_index, node) in group.iter() {
-            if chunk_size == 0 {
-                if let Some(node_chunk_size) = node.get_u64_property("chunkSize") {
-                    chunk_size = node_chunk_size as usize;
-                }
-            }
-            for name_candidate in Self::stream_name_candidates(node.subject.as_str()) {
-                if !name_candidates.contains(&name_candidate) {
-                    name_candidates.push(name_candidate);
-                }
-            }
-        }
         if chunk_size == 0 || name_candidates.is_empty() {
             return None;
         }
+        let expected_number_of_chunks: usize = if size > 0 {
+            (size / chunk_size as u64) as usize
+        } else {
+            0
+        };
+        let (volume, segments): (&DataVolume, Vec<ResolvedSegment>) = Self::find_stream_in_volumes(
+            volumes,
+            &name_candidates,
+            chunks_in_segment,
+            expected_number_of_chunks,
+        )?;
 
-        // Locate the volume that stores the data entries of the stream and
-        // read its bevy segments.
-        for name_candidate in name_candidates.iter() {
-            for volume in volumes.iter() {
-                if let Some(entry_prefix) = volume.get_entry_prefix_for_node_name(
-                    name_candidate,
-                    "00000000",
-                    Some(".index"),
-                ) {
-                    let expected_number_of_chunks: usize = if size > 0 {
-                        (size / chunk_size as u64) as usize
-                    } else {
-                        0
-                    };
-                    let mut segments: Vec<ResolvedSegment> = Vec::new();
-
-                    let mut segments_read: usize = 0;
-                    loop {
-                        if segments_read >= AFF4_STANDARD_MAXIMUM_NUMBER_OF_SEGMENTS {
-                            break;
-                        }
-                        let first_chunk_index: usize = segments_read * chunks_in_segment;
-                        let segment: String = format!("{:08x}", first_chunk_index);
-                        let segment_data_entry_name: String =
-                            format!("{}/{}", entry_prefix, segment);
-                        let segment_index_entry_name: String =
-                            format!("{}/{}.index", entry_prefix, segment);
-                        if !volume.has_entry(segment_data_entry_name.as_str())
-                            || !volume.has_entry(segment_index_entry_name.as_str())
-                        {
-                            break;
-                        }
-                        let index_data: Vec<u8> =
-                            match volume.read_entry_data(segment_index_entry_name.as_str()) {
-                                Ok(index_data) => index_data,
-                                Err(_) => {
-                                    break;
-                                }
-                            };
-                        if index_data.len() % AFF4_STANDARD_BEVY_INDEX_ENTRY_SIZE != 0 {
-                            break;
-                        }
-                        let mut index_entries: Vec<BevyIndexEntry> = Vec::new();
-                        for entry_index in
-                            0..(index_data.len() / AFF4_STANDARD_BEVY_INDEX_ENTRY_SIZE)
-                        {
-                            let offset: usize = entry_index * AFF4_STANDARD_BEVY_INDEX_ENTRY_SIZE;
-                            let bevy_offset: u64 = u64::from_le_bytes(
-                                index_data[offset..(offset + 8)].try_into().unwrap(),
-                            );
-                            let stored_size: u32 = u32::from_le_bytes(
-                                index_data[(offset + 8)..(offset + 12)].try_into().unwrap(),
-                            );
-                            index_entries.push(BevyIndexEntry {
-                                bevy_offset,
-                                stored_size,
-                            });
-                        }
-                        if index_entries.is_empty() {
-                            break;
-                        }
-                        segments.push(ResolvedSegment {
-                            first_chunk_index,
-                            data_entry_name: segment_data_entry_name,
-                            index_entries,
-                        });
-                        segments_read += 1;
-                        if expected_number_of_chunks > 0
-                            && segments
-                                .iter()
-                                .map(|segment| segment.index_entries.len())
-                                .sum::<usize>()
-                                >= expected_number_of_chunks
-                        {
-                            break;
-                        }
-                    }
-                    if segments.is_empty() {
-                        continue;
-                    }
-                    return Some(ResolvedStream {
-                        name: identity.to_string(),
-                        chunk_size,
-                        compression_method,
-                        size,
-                        zip_file: volume.zip_file.clone(),
-                        segments,
-                    });
-                }
-            }
-        }
-        None
+        Some(ResolvedStream {
+            name: identity.to_string(),
+            chunk_size,
+            compression_method,
+            size,
+            zip_file: volume.zip_file.clone(),
+            segments,
+        })
     }
 
     /// Retrieves the identity of a data stream node.
@@ -1052,16 +1160,15 @@ impl Aff4StandardMedia {
         if subject.is_empty() || subject == ":" {
             return String::new();
         }
-        if let Some(rest) = subject.strip_prefix("aff4://") {
-            if let Some(slash_index) = rest.find('/') {
-                let prefix: &str = &rest[..slash_index];
-                if prefix.len() == 36 {
-                    return rest[slash_index + 1..].to_string();
-                }
-            }
-            return rest.to_string();
+        let Some(rest) = subject.strip_prefix("aff4://") else {
+            return subject.to_string();
+        };
+        if let Some((prefix, tail)) = rest.split_once('/')
+            && prefix.len() == 36
+        {
+            return tail.to_string();
         }
-        subject.to_string()
+        rest.to_string()
     }
 
     /// Retrieves the candidate names of a data stream node.
@@ -1073,21 +1180,42 @@ impl Aff4StandardMedia {
             return candidates;
         }
         candidates.push(subject.to_string());
-        if let Some(rest) = subject.strip_prefix("aff4://") {
-            let mut rest: String = rest.to_string();
-            if !candidates.contains(&rest) {
-                candidates.push(rest.clone());
-            }
-            if let Some(slash_index) = rest.find('/') {
-                if rest[..slash_index].len() == 36 {
-                    rest = rest[slash_index + 1..].to_string();
-                    if !candidates.contains(&rest) {
-                        candidates.push(rest);
-                    }
-                }
-            }
+        let Some(rest) = subject.strip_prefix("aff4://") else {
+            return candidates;
+        };
+        let rest_string: String = rest.to_string();
+        if !candidates.contains(&rest_string) {
+            candidates.push(rest_string);
+        }
+        let Some((prefix, tail)) = rest.split_once('/') else {
+            return candidates;
+        };
+        let tail_string: String = tail.to_string();
+        if prefix.len() == 36 && !candidates.contains(&tail_string) {
+            candidates.push(tail_string);
         }
         candidates
+    }
+
+    /// Attempts to open a candidate container and returns it if it is a valid companion volume.
+    fn try_open_companion_volume(
+        file_resolver: &FileResolverReference,
+        candidate_name: &str,
+        primary_file_name: &str,
+        stored_volume_uris: &[String],
+    ) -> Option<DataVolume> {
+        let path_component: PathComponent = PathComponent::from(candidate_name);
+        let volume: DataVolume = DataVolume::open(file_resolver, &path_component).ok()?;
+
+        if !volume.information.is_standard() {
+            return None;
+        }
+        if Self::is_split_companion_name(candidate_name, primary_file_name)
+            || stored_volume_uris.contains(&volume.volume_uri)
+        {
+            return Some(volume);
+        }
+        None
     }
 }
 
@@ -1115,6 +1243,61 @@ impl Aff4StandardReader {
             media,
             chunk_cache: LruCache::new(AFF4_STANDARD_CHUNK_CACHE_SIZE),
             bevy_cache: LruCache::new(16),
+        }
+    }
+
+    /// Decompresses a compressed chunk according to its compression method.
+    fn decompress_chunk(
+        compression_method: CompressionMethod,
+        compressed_data: &[u8],
+        chunk: &mut [u8],
+        stream_name: &str,
+        chunk_index: usize,
+        stored_size: u32,
+    ) -> Result<(), ErrorTrace> {
+        match compression_method {
+            CompressionMethod::Snappy => {
+                let mut snappy_context: SnappyContext = SnappyContext::new();
+                match snappy_context.decompress(compressed_data, chunk) {
+                    Ok(_) => Ok(()),
+                    Err(mut error) => {
+                        keramics_core::error_trace_add_frame!(
+                            error,
+                            format!(
+                                "Unable to decompress Snappy chunk: {} of data stream: {}",
+                                chunk_index, stream_name
+                            )
+                        );
+                        Err(error)
+                    }
+                }
+            }
+            CompressionMethod::Zlib => {
+                _ = crate::zlib_decompress!(
+                    compressed_data,
+                    chunk,
+                    format!(
+                        "Unable to decompress Zlib chunk: {} of data stream: {}",
+                        chunk_index, stream_name
+                    )
+                );
+                Ok(())
+            }
+            CompressionMethod::Deflate => {
+                _ = crate::deflate_decompress!(
+                    compressed_data,
+                    chunk,
+                    format!(
+                        "Unable to decompress Deflate chunk: {} of data stream: {}",
+                        chunk_index, stream_name
+                    )
+                );
+                Ok(())
+            }
+            CompressionMethod::Stored => Err(keramics_core::error_trace_new!(format!(
+                "Unsupported stored size: {} for chunk: {} of data stream: {}",
+                stored_size, chunk_index, stream_name
+            ))),
         }
     }
 
@@ -1208,125 +1391,85 @@ impl Aff4StandardReader {
             segment_index,
             bevy_offset,
             stored_size,
-        ): (String, usize, CompressionMethod, usize, u64, u32) = {
-            let stream: &ResolvedStream = match self.media.streams.get(stream_index) {
-                Some(stream) => stream,
-                None => {
-                    return Err(keramics_core::error_trace_new!(format!(
-                        "Missing data stream with index: {}",
-                        stream_index
-                    )));
-                }
-            };
-            let (segment_index, _segment, index_entry): (usize, &ResolvedSegment, &BevyIndexEntry) =
-                match stream.get_segment_for_chunk(chunk_index) {
-                    Some(segment) => segment,
-                    None => {
-                        return Err(keramics_core::error_trace_new!(format!(
-                            "Missing chunk: {} of data stream: {}",
-                            chunk_index, stream.name
-                        )));
-                    }
-                };
-            (
-                stream.name.clone(),
-                stream.chunk_size,
-                stream.compression_method,
-                segment_index,
-                index_entry.bevy_offset,
-                index_entry.stored_size,
-            )
-        };
+        ): (String, usize, CompressionMethod, usize, u64, u32) =
+            self.get_chunk_metadata(stream_index, chunk_index)?;
         let mut chunk: Vec<u8> = vec![0; chunk_size];
 
         if stored_size == 0 {
-            // A stored size of 0 indicates a chunk consisting only of zero
-            // bytes.
-        } else if stored_size as usize == chunk_size {
+            // A stored size of 0 indicates a chunk consisting only of zero bytes.
+            self.chunk_cache.insert(cache_key, chunk.clone());
+            return Ok(chunk);
+        }
+        let bevy_data: Vec<u8> = match self.get_bevy_data(stream_index, segment_index) {
+            Ok(bevy_data) => bevy_data,
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(error, "Unable to retrieve bevy data");
+                return Err(error);
+            }
+        };
+        let bevy_data_offset: usize = bevy_offset as usize;
+        let bevy_data_end_offset: usize = bevy_data_offset + stored_size as usize;
+
+        if bevy_data_end_offset > bevy_data.len() {
+            return Err(keramics_core::error_trace_new!(format!(
+                "Unsupported bevy offset: {} for chunk: {} of data stream: {}",
+                bevy_offset, chunk_index, stream_name
+            )));
+        }
+        let stored_data: &[u8] = &bevy_data[bevy_data_offset..bevy_data_end_offset];
+
+        if stored_size as usize == chunk_size {
             // A stored size equal to the chunk size indicates a chunk that is
             // stored without compression.
-            let bevy_data: Vec<u8> = match self.get_bevy_data(stream_index, segment_index) {
-                Ok(bevy_data) => bevy_data,
-                Err(mut error) => {
-                    keramics_core::error_trace_add_frame!(error, "Unable to retrieve bevy data");
-                    return Err(error);
-                }
-            };
-            let bevy_data_offset: usize = bevy_offset as usize;
-            if bevy_data_offset + stored_size as usize > bevy_data.len() {
-                return Err(keramics_core::error_trace_new!(format!(
-                    "Unsupported bevy offset: {} for chunk: {} of data stream: {}",
-                    bevy_offset, chunk_index, stream_name
-                )));
-            }
-            chunk.copy_from_slice(
-                &bevy_data[bevy_data_offset..(bevy_data_offset + stored_size as usize)],
-            );
+            chunk.copy_from_slice(stored_data);
         } else {
-            let bevy_data: Vec<u8> = match self.get_bevy_data(stream_index, segment_index) {
-                Ok(bevy_data) => bevy_data,
-                Err(mut error) => {
-                    keramics_core::error_trace_add_frame!(error, "Unable to retrieve bevy data");
-                    return Err(error);
-                }
-            };
-            let bevy_data_offset: usize = bevy_offset as usize;
-            if bevy_data_offset + stored_size as usize > bevy_data.len() {
-                return Err(keramics_core::error_trace_new!(format!(
-                    "Unsupported bevy offset: {} for chunk: {} of data stream: {}",
-                    bevy_offset, chunk_index, stream_name
-                )));
-            }
-            let compressed_data: &[u8] =
-                &bevy_data[bevy_data_offset..(bevy_data_offset + stored_size as usize)];
-            match compression_method {
-                CompressionMethod::Snappy => {
-                    let mut snappy_context: SnappyContext = SnappyContext::new();
-                    match snappy_context.decompress(compressed_data, &mut chunk) {
-                        Ok(_) => {}
-                        Err(mut error) => {
-                            keramics_core::error_trace_add_frame!(
-                                error,
-                                format!(
-                                    "Unable to decompress Snappy chunk: {} of data stream: {}",
-                                    chunk_index, stream_name
-                                )
-                            );
-                            return Err(error);
-                        }
-                    }
-                }
-                CompressionMethod::Zlib => {
-                    _ = crate::zlib_decompress!(
-                        compressed_data,
-                        &mut chunk,
-                        format!(
-                            "Unable to decompress Zlib chunk: {} of data stream: {}",
-                            chunk_index, stream_name
-                        )
-                    );
-                }
-                CompressionMethod::Deflate => {
-                    _ = crate::deflate_decompress!(
-                        compressed_data,
-                        &mut chunk,
-                        format!(
-                            "Unable to decompress Deflate chunk: {} of data stream: {}",
-                            chunk_index, stream_name
-                        )
-                    );
-                }
-                CompressionMethod::Stored => {
-                    return Err(keramics_core::error_trace_new!(format!(
-                        "Unsupported stored size: {} for chunk: {} of data stream: {}",
-                        stored_size, chunk_index, stream_name
-                    )));
-                }
-            }
+            Self::decompress_chunk(
+                compression_method,
+                stored_data,
+                &mut chunk,
+                stream_name.as_str(),
+                chunk_index,
+                stored_size,
+            )?;
         }
         self.chunk_cache.insert(cache_key, chunk.clone());
 
         Ok(chunk)
+    }
+
+    /// Retrieves metadata for the specified stream chunk.
+    fn get_chunk_metadata(
+        &self,
+        stream_index: usize,
+        chunk_index: usize,
+    ) -> Result<(String, usize, CompressionMethod, usize, u64, u32), ErrorTrace> {
+        let stream: &ResolvedStream = match self.media.streams.get(stream_index) {
+            Some(stream) => stream,
+            None => {
+                return Err(keramics_core::error_trace_new!(format!(
+                    "Missing data stream with index: {}",
+                    stream_index
+                )));
+            }
+        };
+        let (segment_index, _segment, index_entry): (usize, &ResolvedSegment, &BevyIndexEntry) =
+            match stream.get_segment_for_chunk(chunk_index) {
+                Some(segment) => segment,
+                None => {
+                    return Err(keramics_core::error_trace_new!(format!(
+                        "Missing chunk: {} of data stream: {}",
+                        chunk_index, stream.name
+                    )));
+                }
+            };
+        Ok((
+            stream.name.clone(),
+            stream.chunk_size,
+            stream.compression_method,
+            segment_index,
+            index_entry.bevy_offset,
+            index_entry.stored_size,
+        ))
     }
 
     /// Retrieves the map entry that covers the specified offset.
@@ -1373,75 +1516,55 @@ impl Aff4StandardReader {
                         entry.length as usize - offset_in_entry,
                         read_size - offset_in_read,
                     );
-                    match entry.target {
-                        MapTarget::Gap | MapTarget::Symbolic(_) => {
-                            let fill_byte: u8 = match entry.target {
-                                MapTarget::Symbolic(fill_byte) => fill_byte,
-                                _ => 0,
-                            };
-                            data[offset_in_read..(offset_in_read + available_length)]
-                                .fill(fill_byte);
-                        }
-                        MapTarget::Stream(stream_index) => {
-                            let target_position: u64 = entry.target_offset + offset_in_entry as u64;
-                            match self.read_stream_data(
-                                stream_index,
-                                target_position,
-                                &mut data[offset_in_read..(offset_in_read + available_length)],
-                            ) {
-                                Ok(_) => {}
-                                Err(mut error) => {
-                                    keramics_core::error_trace_add_frame!(
-                                        error,
-                                        "Unable to read stream data"
-                                    );
-                                    return Err(error);
-                                }
-                            }
-                        }
-                    }
+                    let target_position: u64 = entry.target_offset + offset_in_entry as u64;
+                    self.read_target_data(
+                        entry.target,
+                        target_position,
+                        &mut data[offset_in_read..(offset_in_read + available_length)],
+                    )?;
                     offset_in_read += available_length;
                     position += available_length as u64;
                 }
                 None => {
                     // The offset is not covered by a map entry; the region is
                     // filled with the default gap target of the map.
-                    match map.gap_default {
-                        MapTarget::Gap | MapTarget::Symbolic(_) => {
-                            let fill_byte: u8 = match map.gap_default {
-                                MapTarget::Symbolic(fill_byte) => fill_byte,
-                                _ => 0,
-                            };
-                            data[offset_in_read..read_size].fill(fill_byte);
-                            offset_in_read = read_size;
-                            position = u64::MAX;
-                        }
-                        MapTarget::Stream(stream_index) => {
-                            // A gap default data stream is read from its
-                            // corresponding media offset.
-                            let read_length: usize = read_size - offset_in_read;
-                            match self.read_stream_data(
-                                stream_index,
-                                position,
-                                &mut data[offset_in_read..read_size],
-                            ) {
-                                Ok(_) => {}
-                                Err(mut error) => {
-                                    keramics_core::error_trace_add_frame!(
-                                        error,
-                                        "Unable to read stream data"
-                                    );
-                                    return Err(error);
-                                }
-                            }
-                            offset_in_read += read_length;
-                            position += read_length as u64;
-                        }
-                    }
+                    self.read_target_data(
+                        map.gap_default,
+                        position,
+                        &mut data[offset_in_read..read_size],
+                    )?;
+                    offset_in_read = read_size;
                 }
             }
         }
         Ok(read_size)
+    }
+
+    /// Reads data from a map target (gap, symbolic fill byte, or data stream) into `buffer`.
+    fn read_target_data(
+        &mut self,
+        target: MapTarget,
+        target_position: u64,
+        buffer: &mut [u8],
+    ) -> Result<(), ErrorTrace> {
+        match target {
+            MapTarget::Gap => {
+                buffer.fill(0);
+            }
+            MapTarget::Symbolic(fill_byte) => {
+                buffer.fill(fill_byte);
+            }
+            MapTarget::Stream(stream_index) => {
+                match self.read_stream_data(stream_index, target_position, buffer) {
+                    Ok(_) => {}
+                    Err(mut error) => {
+                        keramics_core::error_trace_add_frame!(error, "Unable to read stream data");
+                        return Err(error);
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Reads the data stream data at the specified offset into the buffer.
@@ -1592,10 +1715,11 @@ mod tests {
             };
             let mut file_names: Vec<String> = Vec::new();
             for key in self.files.keys() {
-                if let Some(rest) = key.strip_prefix(&prefix) {
-                    if !rest.contains('/') {
-                        file_names.push(rest.to_string());
-                    }
+                let Some(rest) = key.strip_prefix(&prefix) else {
+                    continue;
+                };
+                if !rest.contains('/') {
+                    file_names.push(rest.to_string());
                 }
             }
             file_names.sort();

@@ -50,6 +50,78 @@ impl AffBlockReader {
         }
     }
 
+    /// Decompresses the data of a compressed page segment.
+    fn decompress_page_data(
+        &self,
+        segment: &AffSegment,
+        compression_algorithm: u32,
+        page_size: usize,
+    ) -> Result<Vec<u8>, ErrorTrace> {
+        match compression_algorithm {
+            AFF_PAGE_COMPRESSION_ALGORITHM_ZLIB => {
+                let compressed_data: Vec<u8> = self.get_segment_data(segment)?;
+                let mut page: Vec<u8> = vec![0; page_size];
+
+                let uncompressed_data_size: usize = crate::zlib_decompress!(
+                    compressed_data.as_slice(),
+                    &mut page,
+                    format!(
+                        "Unable to decompress page data of segment: {}",
+                        segment.get_name()
+                    )
+                );
+                page.truncate(uncompressed_data_size);
+
+                Ok(page)
+            }
+            AFF_PAGE_COMPRESSION_ALGORITHM_LZMA => {
+                let compressed_data: Vec<u8> = self.get_segment_data(segment)?;
+                let mut page: Vec<u8> = vec![0; page_size];
+
+                let uncompressed_data_size: usize = crate::lzma_decompress!(
+                    compressed_data.as_slice(),
+                    &mut page,
+                    format!(
+                        "Unable to decompress page data of segment: {}",
+                        segment.get_name()
+                    )
+                );
+                page.truncate(uncompressed_data_size);
+
+                Ok(page)
+            }
+            AFF_PAGE_COMPRESSION_ALGORITHM_BZIP2 | AFF_PAGE_COMPRESSION_ALGORITHM_ZERO => {
+                Err(keramics_core::error_trace_new!(format!(
+                    "Unsupported page compression algorithm: 0x{:04x} of segment: {}",
+                    compression_algorithm,
+                    segment.get_name()
+                )))
+            }
+            _ => Err(keramics_core::error_trace_new!(format!(
+                "Unknown page compression algorithm: 0x{:04x} of segment: {}",
+                compression_algorithm,
+                segment.get_name()
+            ))),
+        }
+    }
+
+    /// Reads the raw segment data with error context.
+    fn get_segment_data(&self, segment: &AffSegment) -> Result<Vec<u8>, ErrorTrace> {
+        match self.file.get_segment_data(segment.get_name()) {
+            Ok(data) => Ok(data),
+            Err(mut error) => {
+                keramics_core::error_trace_add_frame!(
+                    error,
+                    format!(
+                        "Unable to read segment data of segment: {}",
+                        segment.get_name()
+                    )
+                );
+                Err(error)
+            }
+        }
+    }
+
     /// Retrieves the data of a page, decompressing it when needed.
     fn read_page(&mut self, page_index: usize) -> Result<Vec<u8>, ErrorTrace> {
         if self.page_cache.contains(&page_index) {
@@ -95,19 +167,7 @@ impl AffBlockReader {
             return Ok(vec![0; page_size]);
         }
         if (flag & AFF_PAGE_FLAG_COMPRESSED) == 0 {
-            let page: Vec<u8> = match self.file.get_segment_data(segment.get_name()) {
-                Ok(page) => page,
-                Err(mut error) => {
-                    keramics_core::error_trace_add_frame!(
-                        error,
-                        format!(
-                            "Unable to read segment data of segment: {}",
-                            segment.get_name()
-                        )
-                    );
-                    return Err(error);
-                }
-            };
+            let page: Vec<u8> = self.get_segment_data(segment)?;
 
             if page.len() > page_size {
                 return Err(keramics_core::error_trace_new!(format!(
@@ -120,79 +180,7 @@ impl AffBlockReader {
             return Ok(page);
         }
         let compression_algorithm: u32 = flag & AFF_PAGE_COMPRESSION_ALGORITHM_MASK;
-
-        match compression_algorithm {
-            AFF_PAGE_COMPRESSION_ALGORITHM_ZLIB => {
-                let compressed_data: Vec<u8> = match self.file.get_segment_data(segment.get_name())
-                {
-                    Ok(compressed_data) => compressed_data,
-                    Err(mut error) => {
-                        keramics_core::error_trace_add_frame!(
-                            error,
-                            format!(
-                                "Unable to read segment data of segment: {}",
-                                segment.get_name()
-                            )
-                        );
-                        return Err(error);
-                    }
-                };
-                let mut page: Vec<u8> = vec![0; page_size];
-
-                let uncompressed_data_size: usize = crate::zlib_decompress!(
-                    compressed_data.as_slice(),
-                    &mut page,
-                    format!(
-                        "Unable to decompress page data of segment: {}",
-                        segment.get_name()
-                    )
-                );
-                page.truncate(uncompressed_data_size);
-
-                Ok(page)
-            }
-            AFF_PAGE_COMPRESSION_ALGORITHM_LZMA => {
-                let compressed_data: Vec<u8> = match self.file.get_segment_data(segment.get_name())
-                {
-                    Ok(compressed_data) => compressed_data,
-                    Err(mut error) => {
-                        keramics_core::error_trace_add_frame!(
-                            error,
-                            format!(
-                                "Unable to read segment data of segment: {}",
-                                segment.get_name()
-                            )
-                        );
-                        return Err(error);
-                    }
-                };
-                let mut page: Vec<u8> = vec![0; page_size];
-
-                let uncompressed_data_size: usize = crate::lzma_decompress!(
-                    compressed_data.as_slice(),
-                    &mut page,
-                    format!(
-                        "Unable to decompress page data of segment: {}",
-                        segment.get_name()
-                    )
-                );
-                page.truncate(uncompressed_data_size);
-
-                Ok(page)
-            }
-            AFF_PAGE_COMPRESSION_ALGORITHM_BZIP2 | AFF_PAGE_COMPRESSION_ALGORITHM_ZERO => {
-                Err(keramics_core::error_trace_new!(format!(
-                    "Unsupported page compression algorithm: 0x{:04x} of segment: {}",
-                    compression_algorithm,
-                    segment.get_name()
-                )))
-            }
-            _ => Err(keramics_core::error_trace_new!(format!(
-                "Unknown page compression algorithm: 0x{:04x} of segment: {}",
-                compression_algorithm,
-                segment.get_name()
-            ))),
-        }
+        self.decompress_page_data(segment, compression_algorithm, page_size)
     }
 }
 
